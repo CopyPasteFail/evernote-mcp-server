@@ -152,6 +152,34 @@ Gemini CLI is the primary supported local MCP client in v0.1. Exact config shape
   - optional `READ_ONLY` (defaults to `true`)
   - optional `EVERNOTE_SANDBOX` (defaults to `false`)
 
+Gemini CLI settings can be user-wide in `~/.gemini/settings.json` or project-specific in `.gemini/settings.json` at the repo root.
+
+Recommended project-specific config for WSL/Linux:
+```json
+{
+  "mcpServers": {
+    "evernote-mcp-server": {
+      "command": "bash",
+      "args": [
+        "-lc",
+        "source .venv/bin/activate && PYTHONPATH=src python -m evernote_mcp --transport stdio"
+      ],
+      "cwd": "/absolute/path/to/evernote-mcp-server",
+      "trust": true
+    }
+  }
+}
+```
+
+`cwd` should point at the repo root because the server auto-loads `.env` from the current working directory.
+
+Before using Gemini CLI with this MCP server, run:
+```bash
+PYTHONPATH=src python -m evernote_mcp auth
+```
+
+Replace `/absolute/path/to/evernote-mcp-server` with your actual absolute repo path.
+
 ## 8. Maintainer setup
 ### 8.1 Clone and install dev dependencies
 ```bash
