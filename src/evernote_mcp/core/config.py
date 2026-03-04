@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Mapping
 
-EVERNOTE_TOKEN_ENV_NAME = "EVERNOTE_TOKEN"
+EVERNOTE_TOKEN_ENV_NAME = "EVERNOTE_TOKEN"  # nosec B105
 READ_ONLY_ENV_NAME = "READ_ONLY"
 LOG_LEVEL_ENV_NAME = "LOG_LEVEL"
 
