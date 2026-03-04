@@ -1,4 +1,6 @@
-PYTHON ?= python3
+VENV_PYTHON := .venv/bin/python
+SYSTEM_PYTHON := python3
+PYTHON ?= $(if $(wildcard $(VENV_PYTHON)),$(VENV_PYTHON),$(SYSTEM_PYTHON))
 
 .PHONY: lint security test check
 
