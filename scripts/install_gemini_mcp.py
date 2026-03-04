@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Install or update Gemini MCP server settings for evernote-mcp-server.
+"""Install or update development Gemini MCP settings for evernote-mcp-server.
 
 This script edits a Gemini settings JSON file and ensures a single MCP server
-entry exists for this repository. It supports two runtime modes:
+entry exists for this repository's local development workflows. It supports two
+runtime modes:
 - `python`: run from local virtualenv/development environment
-- `docker`: run through a Docker container
+- `docker`: run through a locally built Docker container image
 
 The operation is idempotent: running the script multiple times with the same
 inputs produces the same resulting settings content.
@@ -54,7 +55,7 @@ def build_python_server_config(repository_path: Path) -> dict[str, Any]:
 def build_docker_server_config(
     repository_path: Path, docker_image: str, docker_volume_name: str
 ) -> dict[str, Any]:
-    """Build Gemini MCP server configuration for Docker runtime.
+    """Build Gemini MCP server configuration for local Docker development runtime.
 
     Inputs:
     - repository_path: absolute repository root used as Gemini `cwd`
@@ -175,7 +176,10 @@ def parse_arguments() -> argparse.Namespace:
     repository_root = Path(__file__).resolve().parent.parent
 
     parser = argparse.ArgumentParser(
-        description="Install/update evernote-mcp-server in Gemini settings."
+        description=(
+            "Install/update evernote-mcp-server development entries in "
+            "Gemini settings."
+        )
     )
     parser.add_argument(
         "--mode",
@@ -202,7 +206,7 @@ def parse_arguments() -> argparse.Namespace:
         "--docker-image",
         default=DEFAULT_DOCKER_IMAGE,
         help=(
-            "Docker image to run in docker mode "
+            "Docker image to run in docker mode (typically a local dev image) "
             f"(default: {DEFAULT_DOCKER_IMAGE})."
         ),
     )
