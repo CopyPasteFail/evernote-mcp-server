@@ -30,7 +30,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Fetch origin/main
-        run: git fetch origin main --no-tags
+        run: git fetch --prune origin main --no-tags
 
       - name: Verify tagged commit is on origin/main
         run: |

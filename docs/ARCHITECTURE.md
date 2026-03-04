@@ -28,16 +28,16 @@ Main flow:
 This structure isolates tool logic from transport logic, so adding SSE later should not require changes in the tool modules.
 
 ## 4. Transport abstraction
-v0.1 implements stdio only in `transport/stdio.py`.
+The architecture is intentionally transport-agnostic: tool modules and Evernote logic do not depend on a specific transport. In v0.1, only stdio is implemented in `transport/stdio.py`.
 
-`transport/sse.py` exists intentionally as a placeholder. CLI accepts `--transport sse` but returns a clear not-implemented error. This keeps the CLI and module layout future-proof while preventing partial or insecure SSE behavior in v0.1.
+`transport/sse.py` exists intentionally as a placeholder. CLI accepts `--transport sse` but returns a clear not-implemented error. SSE is deliberately deferred in v0.1, and adding it later should not require changes to Evernote logic or tool modules.
 
 ## 5. Security model
 - Required secret: `EVERNOTE_TOKEN`.
 - Write gate: `READ_ONLY` (default `true`).
 - Every write tool calls centralized policy enforcement before mutation.
 - Blocked writes raise a clear message:
-  - `Set READ_ONLY=false to enable write operations.`
+  - `Write operations are disabled. Set READ_ONLY=false to enable write operations.`
 - No secret logging.
 
 The default state is read-only, which limits accidental destructive behavior in local and shared environments.
@@ -53,7 +53,7 @@ The default state is read-only, which limits accidental destructive behavior in 
 This design prevents off-branch or unvalidated release tags from being published.
 
 ## 7. Future improvements
-- Implement SSE transport with explicit auth and origin controls.
+- Implement SSE transport with explicit auth and origin controls; v0.1 intentionally postpones SSE so a remote surface is not shipped before auth, origin, and security boundaries are fully designed.
 - Add structured JSON logging mode.
 - Add focused integration tests with mocked Evernote API responses.
 - Add richer tool-level input validation and error mapping.

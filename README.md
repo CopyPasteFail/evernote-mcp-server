@@ -5,8 +5,8 @@
 
 The server is designed for:
 - secure defaults (`READ_ONLY=true`)
-- local usage over stdio with Gemini CLI
-- container distribution through Docker and GHCR
+- local usage over stdio, with Gemini CLI as the primary supported MCP client in v0.1
+- distribution as a Docker image via GHCR
 - clean transport separation so SSE can be added later without rewriting tool logic
 
 v0.1 implements stdio only.
@@ -70,7 +70,7 @@ python -m evernote_mcp --transport sse
 This exits with a clear not-yet-implemented message.
 
 ### Gemini CLI over stdio
-Configure Gemini CLI MCP to launch:
+Gemini CLI is the primary supported local MCP client in v0.1. Exact MCP client configuration shape can vary by Gemini CLI version, but the important values are:
 - command: `python`
 - args: `-m evernote_mcp --transport stdio`
 - environment: `EVERNOTE_TOKEN`, optional `READ_ONLY` (defaults to true)
@@ -89,6 +89,7 @@ GHCR image example:
 ```bash
 docker run --rm -i \
   -e EVERNOTE_TOKEN="your-token" \
+  -e READ_ONLY=true \
   ghcr.io/<owner>/evernote-mcp-server:v0.1.0
 ```
 
@@ -99,7 +100,7 @@ git clone <repo-url>
 cd evernote-mcp-server
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-dev.txt
+pip install -r requirements.txt -r requirements-dev.txt
 ```
 
 ### Enable repository pre-push hook
@@ -180,7 +181,7 @@ Contributors should:
 2. open pull requests targeting `main`
 3. run `make check` locally before pushing
 
-Contributors should not create release tags (`v*`). Release tags are maintainer-controlled.
+Contributors should not run `scripts/release.sh` and should not create release tags (`v*`). Release tags are maintainer-controlled.
 
 ## 9. Troubleshooting
 - `Configuration error: Missing required environment variable: EVERNOTE_TOKEN.`

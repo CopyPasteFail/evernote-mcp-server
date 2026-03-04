@@ -33,8 +33,8 @@ if [[ "$version_bump_type" != "patch" && "$version_bump_type" != "minor" && "$ve
   exit 1
 fi
 
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  echo "Error: working tree is not clean. Commit or stash changes before releasing." >&2
+if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+  echo "Error: working tree is not clean. Commit, stash, or remove changes before releasing." >&2
   exit 1
 fi
 

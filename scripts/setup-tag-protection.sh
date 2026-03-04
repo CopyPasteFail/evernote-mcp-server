@@ -31,7 +31,7 @@ repo_name_with_owner="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 owner_name="${repo_name_with_owner%%/*}"
 repository_name="${repo_name_with_owner##*/}"
 
-echo "Configuring tag protection for ${repo_name_with_owner} (${TAG_PATTERN})..."
+echo "Applying tag protection (best effort) for ${repo_name_with_owner} (${TAG_PATTERN})..."
 
 existing_ruleset_id="$(gh api "/repos/${owner_name}/${repository_name}/rulesets" --jq ".[] | select(.name == \"${RULESET_NAME}\") | .id" 2>/dev/null | head -n 1 || true)"
 
@@ -86,21 +86,22 @@ else
 fi
 
 if [[ "$ruleset_success" == "true" ]]; then
-  echo "Tag protection configured successfully."
+  echo "Tag protection configured successfully via rulesets API."
   exit 0
 fi
 
-echo "Ruleset API attempt failed. Trying legacy tag-protection endpoint..." >&2
+echo "Rulesets API attempt failed. Trying legacy tag-protection endpoint..." >&2
 if gh api \
   --silent \
   -X POST \
   -H "Accept: application/vnd.github+json" \
   "/repos/${owner_name}/${repository_name}/tags/protection" \
   -f pattern="$TAG_PATTERN"; then
-  echo "Legacy tag protection endpoint succeeded."
+  echo "Tag protection configured successfully via legacy tag-protection API."
   exit 0
 fi
 
-echo "Failed to configure tag protection via API." >&2
+echo "Automatic tag protection setup did not complete." >&2
+echo "Note: GitHub ruleset/tag-protection APIs and payload shape can change over time." >&2
 print_ui_fallback
 exit 1
