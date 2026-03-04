@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
-from types import SimpleNamespace
 import types
+from typing import Callable
 from urllib.parse import urlparse
 
 import pytest
 
 try:
-    import requests_oauthlib as _requests_oauthlib  # noqa: F401
+    __import__("requests_oauthlib")
 except ModuleNotFoundError:  # pragma: no cover - local test env compatibility
-    sys.modules["requests_oauthlib"] = types.SimpleNamespace(OAuth1Session=object)
+    requests_oauthlib_module = types.ModuleType("requests_oauthlib")
+    requests_oauthlib_module.OAuth1Session = object  # type: ignore[attr-defined]
+    sys.modules["requests_oauthlib"] = requests_oauthlib_module
 
 from evernote_mcp.evernote import oauth as oauth_module
 from evernote_mcp.evernote.auth_storage import AuthStorageError
@@ -23,19 +25,24 @@ from evernote_mcp.evernote.oauth import (
     OAuthCallbackPayload,
     OAuthEndpoints,
     OAuthFlowError,
+    OAuthSessionProtocol,
     open_authorization_url,
     resolve_oauth_endpoints,
     run_oauth_bootstrap,
 )
 
 
-class _StubCallbackListener:
+class _StubCallbackListener(OAuthCallbackListener):
     """Minimal callback listener stub used for deterministic OAuth tests."""
 
     def __init__(self, callback_payload: OAuthCallbackPayload) -> None:
-        self.callback_url = "http://127.0.0.1:41235/callback"
+        self._callback_url = "http://127.0.0.1:41235/callback"
         self._callback_payload = callback_payload
         self.received_timeout_seconds: int | None = None
+
+    @property
+    def callback_url(self) -> str:
+        return self._callback_url
 
     def __enter__(self) -> _StubCallbackListener:
         return self
@@ -55,16 +62,37 @@ class _StubRequestTokenSession:
         self.request_token_url: str | None = None
         self.authorization_base_url: str | None = None
 
-    def fetch_request_token(self, request_token_url: str) -> dict[str, str]:
-        self.request_token_url = request_token_url
+    def authorization_url(
+        self,
+        url: str,
+        request_token: str | None = None,
+        **kwargs: object,
+    ) -> str:
+        del request_token, kwargs
+        self.authorization_base_url = url
+        return f"{url}?oauth_token=request-oauth-token"
+
+    def fetch_request_token(
+        self,
+        url: str,
+        realm: str | None = None,
+        **request_kwargs: object,
+    ) -> dict[str, str]:
+        del realm, request_kwargs
+        self.request_token_url = url
         return {
             "oauth_token": "request-oauth-token",
             "oauth_token_secret": "request-secret",
         }
 
-    def authorization_url(self, authorize_url: str) -> str:
-        self.authorization_base_url = authorize_url
-        return f"{authorize_url}?oauth_token=request-oauth-token"
+    def fetch_access_token(
+        self,
+        url: str,
+        verifier: str | None = None,
+        **request_kwargs: object,
+    ) -> dict[str, str]:
+        del url, verifier, request_kwargs
+        raise AssertionError("Request-token session should not exchange access tokens.")
 
 
 class _StubAccessTokenSession:
@@ -73,8 +101,32 @@ class _StubAccessTokenSession:
     def __init__(self) -> None:
         self.access_token_url: str | None = None
 
-    def fetch_access_token(self, access_token_url: str) -> dict[str, str]:
-        self.access_token_url = access_token_url
+    def authorization_url(
+        self,
+        url: str,
+        request_token: str | None = None,
+        **kwargs: object,
+    ) -> str:
+        del url, request_token, kwargs
+        raise AssertionError("Access-token session should not build authorization URLs.")
+
+    def fetch_request_token(
+        self,
+        url: str,
+        realm: str | None = None,
+        **request_kwargs: object,
+    ) -> dict[str, str]:
+        del url, realm, request_kwargs
+        raise AssertionError("Access-token session should not request OAuth request tokens.")
+
+    def fetch_access_token(
+        self,
+        url: str,
+        verifier: str | None = None,
+        **request_kwargs: object,
+    ) -> dict[str, str]:
+        del verifier, request_kwargs
+        self.access_token_url = url
         return {"oauth_token": "final-access-token"}
 
 
@@ -93,11 +145,14 @@ def test_run_oauth_bootstrap_completes_and_persists_token() -> None:
         )
     )
 
-    def build_oauth_session(**kwargs: str) -> _StubRequestTokenSession | _StubAccessTokenSession:
+    def build_oauth_session(**kwargs: str) -> OAuthSessionProtocol:
         created_session_kwargs.append(kwargs)
         if "resource_owner_key" in kwargs:
             return access_session
         return request_session
+
+    def build_callback_listener() -> OAuthCallbackListener:
+        return callback_listener
 
     def open_authorization_url(authorization_url: str) -> bool:
         captured_authorization_urls.append(authorization_url)
@@ -113,7 +168,7 @@ def test_run_oauth_bootstrap_completes_and_persists_token() -> None:
         sandbox=False,
         timeout_seconds=15,
         oauth_session_factory=build_oauth_session,
-        callback_listener_factory=lambda: callback_listener,
+        callback_listener_factory=build_callback_listener,
         authorization_url_opener=open_authorization_url,
         token_persister=persist_token,
     )
@@ -151,8 +206,18 @@ def test_run_oauth_bootstrap_fails_when_callback_token_mismatches_request_token(
 
     request_session = _StubRequestTokenSession()
 
-    def build_oauth_session(**kwargs: str) -> _StubRequestTokenSession:
+    def build_oauth_session(**kwargs: str) -> OAuthSessionProtocol:
+        del kwargs
         return request_session
+
+    def build_callback_listener() -> OAuthCallbackListener:
+        return callback_listener
+
+    def open_url(_authorization_url: str) -> bool:
+        return True
+
+    def persist_token(_access_token: str, _sandbox: bool) -> Path:
+        return Path("/tmp/test-token.json")
 
     callback_listener = _StubCallbackListener(
         OAuthCallbackPayload(
@@ -167,9 +232,9 @@ def test_run_oauth_bootstrap_fails_when_callback_token_mismatches_request_token(
             consumer_secret="consumer-secret",
             sandbox=False,
             oauth_session_factory=build_oauth_session,
-            callback_listener_factory=lambda: callback_listener,
-            authorization_url_opener=lambda _authorization_url: True,
-            token_persister=lambda _access_token, _sandbox: Path("/tmp/test-token.json"),
+            callback_listener_factory=build_callback_listener,
+            authorization_url_opener=open_url,
+            token_persister=persist_token,
         )
 
 
@@ -185,10 +250,16 @@ def test_run_oauth_bootstrap_wraps_token_persistence_failure_with_actionable_err
         )
     )
 
-    def build_oauth_session(**kwargs: str) -> _StubRequestTokenSession | _StubAccessTokenSession:
+    def build_oauth_session(**kwargs: str) -> OAuthSessionProtocol:
         if "resource_owner_key" in kwargs:
             return access_session
         return request_session
+
+    def build_callback_listener() -> OAuthCallbackListener:
+        return callback_listener
+
+    def open_url(_authorization_url: str) -> bool:
+        return True
 
     def fail_token_persist(_access_token: str, _sandbox: bool) -> Path:
         raise AuthStorageError("Failed writing saved token file at /tmp/token.json.")
@@ -199,8 +270,8 @@ def test_run_oauth_bootstrap_wraps_token_persistence_failure_with_actionable_err
             consumer_secret="consumer-secret",
             sandbox=False,
             oauth_session_factory=build_oauth_session,
-            callback_listener_factory=lambda: callback_listener,
-            authorization_url_opener=lambda _authorization_url: True,
+            callback_listener_factory=build_callback_listener,
+            authorization_url_opener=open_url,
             token_persister=fail_token_persist,
         )
 
@@ -224,23 +295,28 @@ def test_open_authorization_url_prefers_wsl_powershell_when_available(
 
     subprocess_invocations: list[list[str]] = []
 
+    class _CompletedProcessStub:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+
+    def resolve_command(command_name: str) -> str | None:
+        if command_name == "powershell.exe":
+            return "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+        return None
+
+    def run_subprocess(
+        arguments: list[str],
+        stdout: object,
+        stderr: object,
+        check: bool,
+    ) -> _CompletedProcessStub:
+        del stdout, stderr, check
+        subprocess_invocations.append(arguments)
+        return _CompletedProcessStub(returncode=0)
+
     monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
-    monkeypatch.setattr(
-        oauth_module,
-        "which",
-        lambda command_name: (
-            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-            if command_name == "powershell.exe"
-            else None
-        ),
-    )
-    monkeypatch.setattr(
-        oauth_module.subprocess,
-        "run",
-        lambda arguments, stdout, stderr, check: (
-            subprocess_invocations.append(arguments) or SimpleNamespace(returncode=0)
-        ),
-    )
+    monkeypatch.setattr(oauth_module, "which", resolve_command)
+    monkeypatch.setattr(oauth_module.subprocess, "run", run_subprocess)
 
     def fail_if_called(*args: object, **kwargs: object) -> bool:
         raise AssertionError("webbrowser.open should not be called when powershell succeeds")
@@ -256,6 +332,8 @@ def test_callback_listener_returns_explicit_callback_url_when_configured(
 ) -> None:
     """Ensure listener can bind one address while returning an explicit callback URL."""
 
+    bound_server_addresses: list[tuple[str, int]] = []
+
     class _FakeHttpServer:
         def __init__(
             self,
@@ -269,6 +347,7 @@ def test_callback_listener_returns_explicit_callback_url_when_configured(
                 41555 if server_address[1] == 0 else server_address[1],
             )
             self.callback_path = callback_path
+            bound_server_addresses.append(self.server_address)
 
         def serve_forever(self, poll_interval: float = 0.2) -> None:
             del poll_interval
@@ -280,7 +359,12 @@ def test_callback_listener_returns_explicit_callback_url_when_configured(
             return
 
     class _FakeThread:
-        def __init__(self, target, kwargs, daemon: bool) -> None:
+        def __init__(
+            self,
+            target: Callable[..., object],
+            kwargs: dict[str, float],
+            daemon: bool,
+        ) -> None:
             del target, kwargs, daemon
 
         def start(self) -> None:
@@ -300,9 +384,8 @@ def test_callback_listener_returns_explicit_callback_url_when_configured(
         explicit_callback_url=explicit_callback_url,
     ) as callback_listener:
         assert callback_listener.callback_url == explicit_callback_url
-        assert callback_listener._http_server is not None
-        assert callback_listener._http_server.server_address[0] == "0.0.0.0"
-        assert callback_listener._http_server.server_address[1] > 0
+        assert bound_server_addresses[0][0] == "0.0.0.0"
+        assert bound_server_addresses[0][1] > 0
 
 
 def test_callback_listener_derives_callback_url_from_random_bound_port(
@@ -334,7 +417,12 @@ def test_callback_listener_derives_callback_url_from_random_bound_port(
             return
 
     class _FakeThread:
-        def __init__(self, target, kwargs, daemon: bool) -> None:
+        def __init__(
+            self,
+            target: Callable[..., object],
+            kwargs: dict[str, float],
+            daemon: bool,
+        ) -> None:
             del target, kwargs, daemon
 
         def start(self) -> None:

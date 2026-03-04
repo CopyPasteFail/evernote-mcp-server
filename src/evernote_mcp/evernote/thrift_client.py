@@ -8,16 +8,160 @@ authentication only.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
-
-from evernote.edam.notestore import NoteStore
-from evernote.edam.notestore.ttypes import NoteFilter, NotesMetadataResultSpec
-from evernote.edam.userstore import UserStore
-from thrift.protocol import TBinaryProtocol
-from thrift.transport import THttpClient
+from importlib import import_module
+from types import SimpleNamespace
+from typing import Any, Protocol, TypeAlias, TypeGuard, cast, runtime_checkable
 
 EVERNOTE_USER_STORE_URL = "https://www.evernote.com/edam/user"
 EVERNOTE_SANDBOX_USER_STORE_URL = "https://sandbox.evernote.com/edam/user"
+
+
+@runtime_checkable
+class Transport(Protocol):
+    """Represent the minimal Thrift transport lifecycle used by this module."""
+
+    def open(self) -> None:
+        """Open the transport."""
+
+    def close(self) -> None:
+        """Close the transport."""
+
+
+ClientWithTransport: TypeAlias = tuple[object, Transport]
+ClientFactoryResult: TypeAlias = object | ClientWithTransport
+ClientFactory: TypeAlias = Callable[[str], ClientFactoryResult]
+
+
+def _build_binary_protocol_fallback(transport: Transport) -> SimpleNamespace:
+    """Build a minimal fallback protocol object that exposes `.trans`.
+
+    Args:
+        transport: Transport instance associated with the protocol.
+
+    Returns:
+        Namespace with a `trans` attribute used by transport extraction.
+    """
+
+    return SimpleNamespace(trans=transport)
+
+
+def _is_client_with_transport(candidate_client: object) -> TypeGuard[ClientWithTransport]:
+    """Check whether a factory result is a `(client, transport)` tuple.
+
+    Args:
+        candidate_client: Value returned by a client factory.
+
+    Returns:
+        `True` when the value matches `(client, transport)` shape with open/close.
+
+    Edge cases:
+        The client value type is intentionally broad (`object`) because generated
+        Thrift client classes are loaded dynamically.
+    """
+
+    if not isinstance(candidate_client, tuple):
+        return False
+    candidate_client_tuple = cast(tuple[object, ...], candidate_client)
+    if len(candidate_client_tuple) != 2:
+        return False
+    candidate_transport = candidate_client_tuple[1]
+    return isinstance(candidate_transport, Transport)
+
+
+def _missing_dependency_callable(dependency_name: str) -> Callable[..., Any]:
+    """Build a callable that raises a clear error for missing optional dependencies.
+
+    Args:
+        dependency_name: Package users must install to use the callable.
+
+    Returns:
+        Callable that raises `ModuleNotFoundError` when invoked.
+    """
+
+    def raise_missing_dependency(*_arguments: Any, **_keyword_arguments: Any) -> Any:
+        raise ModuleNotFoundError(
+            f"Missing dependency '{dependency_name}'. Install project requirements first."
+        )
+
+    return raise_missing_dependency
+
+
+def _load_module_or_fallback(module_name: str, fallback_value: Any) -> Any:
+    """Import a module by name and return a fallback object when unavailable.
+
+    Args:
+        module_name: Fully qualified module import path.
+        fallback_value: Value returned when import fails.
+
+    Returns:
+        Imported module object, or the provided fallback value.
+    """
+
+    try:
+        return import_module(module_name)
+    except ModuleNotFoundError:
+        return fallback_value
+
+
+NoteStore = _load_module_or_fallback(
+    "evernote.edam.notestore.NoteStore",
+    SimpleNamespace(Client=_missing_dependency_callable("evernote3")),
+)
+UserStore = _load_module_or_fallback(
+    "evernote.edam.userstore.UserStore",
+    SimpleNamespace(Client=_missing_dependency_callable("evernote3")),
+)
+TBinaryProtocol = _load_module_or_fallback(
+    "thrift.protocol.TBinaryProtocol",
+    SimpleNamespace(TBinaryProtocol=_build_binary_protocol_fallback),
+)
+THttpClient = _load_module_or_fallback(
+    "thrift.transport.THttpClient",
+    SimpleNamespace(THttpClient=_missing_dependency_callable("thrift")),
+)
+
+NoteFilter = cast(
+    Callable[..., Any],
+    getattr(
+        _load_module_or_fallback(
+            "evernote.edam.notestore.ttypes",
+            SimpleNamespace(NoteFilter=_missing_dependency_callable("evernote3")),
+        ),
+        "NoteFilter",
+    ),
+)
+NotesMetadataResultSpec = cast(
+    Callable[..., Any],
+    getattr(
+        _load_module_or_fallback(
+            "evernote.edam.notestore.ttypes",
+            SimpleNamespace(
+                NotesMetadataResultSpec=_missing_dependency_callable("evernote3")
+            ),
+        ),
+        "NotesMetadataResultSpec",
+    ),
+)
+Note = cast(
+    Callable[..., Any],
+    getattr(
+        _load_module_or_fallback(
+            "evernote.edam.type.ttypes",
+            SimpleNamespace(Note=_missing_dependency_callable("evernote3")),
+        ),
+        "Note",
+    ),
+)
+Tag = cast(
+    Callable[..., Any],
+    getattr(
+        _load_module_or_fallback(
+            "evernote.edam.type.ttypes",
+            SimpleNamespace(Tag=_missing_dependency_callable("evernote3")),
+        ),
+        "Tag",
+    ),
+)
 
 
 class EvernoteThriftClient:
@@ -47,8 +191,8 @@ class EvernoteThriftClient:
         authentication_token: str,
         is_sandbox: bool = False,
         note_store_url: str | None = None,
-        user_store_factory: Callable[[str], Any] | None = None,
-        note_store_factory: Callable[[str], Any] | None = None,
+        user_store_factory: ClientFactory | None = None,
+        note_store_factory: ClientFactory | None = None,
     ) -> None:
         self._authentication_token = authentication_token
         self._is_sandbox = is_sandbox
@@ -114,6 +258,23 @@ class EvernoteThriftClient:
 
         return self.call_note_store_method("createNote", note)
 
+    def build_note(self, title: str, content: str) -> Any:
+        """Construct an EDAM Note value object for create/update flows.
+
+        Args:
+            title: Note title to assign.
+            content: Full ENML document string to persist as the note body.
+
+        Returns:
+            Fresh EDAM `Note` struct instance with the supplied title/content.
+
+        Edge cases:
+            Additional fields such as `notebookGuid` and `tagGuids` are intentionally
+            left unset so callers can apply them conditionally.
+        """
+
+        return Note(title=title, content=content)
+
     def delete_note(self, note_guid: str) -> Any:
         """Move a note to trash using its GUID.
 
@@ -136,6 +297,22 @@ class EvernoteThriftClient:
         """Create a tag with the supplied EDAM Tag object."""
 
         return self.call_note_store_method("createTag", tag)
+
+    def build_tag(self, name: str) -> Any:
+        """Construct an EDAM Tag value object for tag-creation flows.
+
+        Args:
+            name: Human-readable tag name.
+
+        Returns:
+            Fresh EDAM `Tag` struct instance with the supplied name.
+
+        Edge cases:
+            The object includes only the `name` field, leaving GUID assignment to
+            Evernote during `createTag`.
+        """
+
+        return Tag(name=name)
 
     def call_note_store_method(self, method_name: str, *arguments: Any) -> Any:
         """Invoke an arbitrary NoteStore method with token-first authentication.
@@ -179,7 +356,7 @@ class EvernoteThriftClient:
             return EVERNOTE_SANDBOX_USER_STORE_URL
         return EVERNOTE_USER_STORE_URL
 
-    def _build_user_store_client(self, user_store_url: str) -> tuple[UserStore.Client, Any]:
+    def _build_user_store_client(self, user_store_url: str) -> tuple[Any, Transport]:
         """Create a UserStore client and its HTTP transport for one call.
 
         Args:
@@ -189,11 +366,11 @@ class EvernoteThriftClient:
             Tuple of `(UserStore.Client, transport)` for single-call lifecycle control.
         """
 
-        user_store_transport = THttpClient.THttpClient(user_store_url)
-        user_store_protocol = TBinaryProtocol.TBinaryProtocol(user_store_transport)
+        user_store_transport: Transport = THttpClient.THttpClient(user_store_url)
+        user_store_protocol: Any = TBinaryProtocol.TBinaryProtocol(user_store_transport)
         return UserStore.Client(user_store_protocol), user_store_transport
 
-    def _build_note_store_client(self, note_store_url: str) -> tuple[NoteStore.Client, Any]:
+    def _build_note_store_client(self, note_store_url: str) -> tuple[Any, Transport]:
         """Create a NoteStore client and its HTTP transport for one call.
 
         Args:
@@ -203,14 +380,14 @@ class EvernoteThriftClient:
             Tuple of `(NoteStore.Client, transport)` for single-call lifecycle control.
         """
 
-        note_store_transport = THttpClient.THttpClient(note_store_url)
-        note_store_protocol = TBinaryProtocol.TBinaryProtocol(note_store_transport)
+        note_store_transport: Transport = THttpClient.THttpClient(note_store_url)
+        note_store_protocol: Any = TBinaryProtocol.TBinaryProtocol(note_store_transport)
         return NoteStore.Client(note_store_protocol), note_store_transport
 
     def _call_with_transport(
         self,
         service_url: str,
-        client_factory: Callable[[str], Any],
+        client_factory: ClientFactory,
         service_call: Callable[[Any], Any],
     ) -> Any:
         """Execute one Thrift API call with explicit transport open/close lifecycle.
@@ -240,7 +417,10 @@ class EvernoteThriftClient:
         finally:
             service_transport.close()
 
-    def _extract_client_and_transport(self, built_client: Any) -> tuple[Any, Any]:
+    def _extract_client_and_transport(
+        self,
+        built_client: ClientFactoryResult,
+    ) -> tuple[Any, Transport]:
         """Resolve `(client, transport)` from client-factory output.
 
         Args:
@@ -253,8 +433,9 @@ class EvernoteThriftClient:
             ValueError: If a transport cannot be resolved from the factory output.
         """
 
-        if isinstance(built_client, tuple) and len(built_client) == 2:
-            return built_client
+        if _is_client_with_transport(built_client):
+            service_client, service_transport = built_client
+            return cast(Any, service_client), service_transport
 
         client_protocol = getattr(built_client, "_iprot", None) or getattr(
             built_client,
@@ -265,4 +446,4 @@ class EvernoteThriftClient:
         if client_transport is None:
             raise ValueError("Failed to resolve Thrift transport from client factory output.")
 
-        return built_client, client_transport
+        return built_client, cast(Transport, client_transport)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -34,7 +34,7 @@ def test_get_token_file_path_uses_xdg_config_home_when_set(
 def test_persist_access_token_writes_expected_json_structure(tmp_path: Path) -> None:
     """Ensure persisted token JSON includes required fields and values."""
 
-    created_at = datetime(2026, 3, 5, 12, 0, 0, tzinfo=UTC)
+    created_at = datetime(2026, 3, 5, 12, 0, 0, tzinfo=timezone.utc)
 
     written_token_file_path = persist_access_token(
         access_token="access-token-value",

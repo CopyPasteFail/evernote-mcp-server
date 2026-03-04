@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import types
+from typing import Any, cast
 
-try:
-    import requests_oauthlib as _requests_oauthlib  # noqa: F401
-except ModuleNotFoundError:  # pragma: no cover - local test env compatibility
-    sys.modules["requests_oauthlib"] = types.SimpleNamespace(OAuth1Session=object)
+import pytest
+
+if importlib.util.find_spec("requests_oauthlib") is None:  # pragma: no cover - local test env compatibility
+    requests_oauthlib_module = types.ModuleType("requests_oauthlib")
+    casted_requests_oauthlib_module = cast(Any, requests_oauthlib_module)
+    casted_requests_oauthlib_module.OAuth1Session = object
+    sys.modules["requests_oauthlib"] = requests_oauthlib_module
 
 from evernote_mcp import __main__ as main_module
 
@@ -79,7 +84,10 @@ def test_build_argument_parser_rejects_invalid_listen_port() -> None:
         raise AssertionError("Expected parse error for invalid listen port.")
 
 
-def test_main_ignores_auth_flags_for_serve_command(monkeypatch, capsys) -> None:
+def test_main_ignores_auth_flags_for_serve_command(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Ensure serve mode ignores auth-only flags and routes to server startup."""
 
     observed_transports: list[str] = []

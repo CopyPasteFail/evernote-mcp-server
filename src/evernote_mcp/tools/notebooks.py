@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
-from fastmcp import FastMCP
+from typing import Any
 
+from evernote_mcp.core.mcp_server_protocol import MCPServerProtocol
 from evernote_mcp.evernote.client import EvernoteGateway
 
 
-def register_notebook_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGateway) -> None:
+def register_notebook_tools(
+    mcp_server: MCPServerProtocol,
+    evernote_gateway: EvernoteGateway,
+) -> None:
     """Register notebook read tools on the provided MCP server instance.
 
     Args:
-        mcp_server: FastMCP server where tools are registered.
+        mcp_server: MCP server where tools are registered.
         evernote_gateway: Evernote service wrapper used by tool handlers.
     """
 
-    @mcp_server.tool(name="list_notebooks")
-    def list_notebooks() -> list[dict]:
+    def list_notebooks() -> list[dict[str, Any]]:
         """List notebooks available to the authenticated Evernote account.
 
         Use first:
@@ -38,3 +41,5 @@ def register_notebook_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGatew
         """
 
         return evernote_gateway.list_notebooks()
+
+    mcp_server.tool(name="list_notebooks")(list_notebooks)

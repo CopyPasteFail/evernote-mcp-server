@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 DEFAULT_SERVER_NAME = "evernote-mcp-server"
 DEFAULT_SETTINGS_PATH = "~/.gemini/settings.json"
@@ -110,7 +110,7 @@ def load_settings_json(settings_path: Path) -> dict[str, Any]:
         return {}
 
     try:
-        parsed_settings = json.loads(raw_text)
+        parsed_settings: object = json.loads(raw_text)
     except json.JSONDecodeError as exc:
         raise ValueError(
             f"Settings file is not valid JSON: {settings_path}"
@@ -121,7 +121,7 @@ def load_settings_json(settings_path: Path) -> dict[str, Any]:
             f"Gemini settings root must be a JSON object: {settings_path}"
         )
 
-    return parsed_settings
+    return cast(dict[str, Any], parsed_settings)
 
 
 def upsert_mcp_server_entry(
@@ -145,11 +145,12 @@ def upsert_mcp_server_entry(
     """
     current_mcp_servers = settings_data.get("mcpServers")
     if current_mcp_servers is None:
-        settings_data["mcpServers"] = {}
+        mcp_servers: dict[str, Any] = {}
+        settings_data["mcpServers"] = mcp_servers
     elif not isinstance(current_mcp_servers, dict):
         raise ValueError("Field `mcpServers` must be a JSON object.")
-
-    mcp_servers = settings_data["mcpServers"]
+    else:
+        mcp_servers = cast(dict[str, Any], current_mcp_servers)
     existing_server_config = mcp_servers.get(server_name)
     if existing_server_config == server_config:
         return False

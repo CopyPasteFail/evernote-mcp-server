@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastmcp import FastMCP
 from pydantic import Field
 
+from evernote_mcp.core.mcp_server_protocol import MCPServerProtocol
 from evernote_mcp.core.policies import require_writes_enabled
 from evernote_mcp.evernote.client import EvernoteGateway
 
@@ -87,19 +87,21 @@ def _enforce_write_policy() -> None:
     require_writes_enabled()
 
 
-def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGateway) -> None:
+def register_write_note_tools(
+    mcp_server: MCPServerProtocol,
+    evernote_gateway: EvernoteGateway,
+) -> None:
     """Register write note tools while enforcing the shared write policy.
 
     Args:
-        mcp_server: FastMCP server where tools are registered.
+        mcp_server: MCP server where tools are registered.
         evernote_gateway: Evernote service wrapper used by tool handlers.
     """
 
-    @mcp_server.tool(name="append_to_note_plaintext")
     def append_to_note_plaintext(
         note_guid: NoteGuid,
         plaintext_content: PlaintextContent,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Append plain text to an existing note body without replacing it.
 
         Args:
@@ -129,8 +131,7 @@ def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGat
             plaintext_content=plaintext_content,
         )
 
-    @mcp_server.tool(name="set_note_title")
-    def set_note_title(note_guid: NoteGuid, new_title: NoteTitle) -> dict:
+    def set_note_title(note_guid: NoteGuid, new_title: NoteTitle) -> dict[str, Any]:
         """Replace the title of an existing note.
 
         Args:
@@ -156,8 +157,7 @@ def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGat
         _enforce_write_policy()
         return evernote_gateway.set_note_title(note_guid=note_guid, new_title=new_title)
 
-    @mcp_server.tool(name="add_tags_by_name")
-    def add_tags_by_name(note_guid: NoteGuid, tag_names: TagNames) -> dict:
+    def add_tags_by_name(note_guid: NoteGuid, tag_names: TagNames) -> dict[str, Any]:
         """Attach tags to a note by name, creating missing tags automatically.
 
         Args:
@@ -184,8 +184,10 @@ def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGat
         _enforce_write_policy()
         return evernote_gateway.add_tags_by_name(note_guid=note_guid, tag_names=tag_names)
 
-    @mcp_server.tool(name="move_note")
-    def move_note(note_guid: NoteGuid, destination_notebook_guid: NotebookGuid) -> dict:
+    def move_note(
+        note_guid: NoteGuid,
+        destination_notebook_guid: NotebookGuid,
+    ) -> dict[str, Any]:
         """Move a note into another notebook.
 
         Args:
@@ -217,13 +219,12 @@ def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGat
             destination_notebook_guid=destination_notebook_guid,
         )
 
-    @mcp_server.tool(name="create_note")
     def create_note(
         title: NoteTitle,
         plaintext_body: PlaintextContent,
         notebook_guid: OptionalNotebookGuid = None,
         tag_names: OptionalTagNames = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Create a new note from plain text content.
 
         Args:
@@ -261,8 +262,7 @@ def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGat
             tag_names=tag_names,
         )
 
-    @mcp_server.tool(name="delete_note")
-    def delete_note(note_guid: NoteGuid) -> dict:
+    def delete_note(note_guid: NoteGuid) -> dict[str, Any]:
         """Move an existing note to Evernote trash (soft delete).
 
         Args:
@@ -285,3 +285,10 @@ def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGat
 
         _enforce_write_policy()
         return evernote_gateway.delete_note(note_guid=note_guid)
+
+    mcp_server.tool(name="append_to_note_plaintext")(append_to_note_plaintext)
+    mcp_server.tool(name="set_note_title")(set_note_title)
+    mcp_server.tool(name="add_tags_by_name")(add_tags_by_name)
+    mcp_server.tool(name="move_note")(move_note)
+    mcp_server.tool(name="create_note")(create_note)
+    mcp_server.tool(name="delete_note")(delete_note)

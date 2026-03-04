@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastmcp import FastMCP
 from pydantic import Field
 
+from evernote_mcp.core.mcp_server_protocol import MCPServerProtocol
 from evernote_mcp.evernote.client import EvernoteGateway
 
 DEFAULT_SEARCH_OFFSET = 0
@@ -55,20 +55,22 @@ NoteGuid = Annotated[
 ]
 
 
-def register_read_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGateway) -> None:
+def register_read_note_tools(
+    mcp_server: MCPServerProtocol,
+    evernote_gateway: EvernoteGateway,
+) -> None:
     """Register read-focused note tools on the provided MCP server.
 
     Args:
-        mcp_server: FastMCP server where tools are registered.
+        mcp_server: MCP server where tools are registered.
         evernote_gateway: Evernote service wrapper used by tool handlers.
     """
 
-    @mcp_server.tool(name="search_notes")
     def search_notes(
         search_query: SearchQuery,
         offset: SearchOffset = DEFAULT_SEARCH_OFFSET,
         max_results: SearchMaxResults = DEFAULT_SEARCH_MAX_RESULTS,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Search note metadata only. This tool does not return ENML note content.
 
         Args:
@@ -100,8 +102,7 @@ def register_read_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGate
             max_results=max_results,
         )
 
-    @mcp_server.tool(name="get_note")
-    def get_note(note_guid: NoteGuid) -> dict:
+    def get_note(note_guid: NoteGuid) -> dict[str, Any]:
         """Fetch a full note, including the ENML body, for a known note GUID.
 
         Args:
@@ -124,8 +125,7 @@ def register_read_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGate
 
         return evernote_gateway.get_note(note_guid=note_guid)
 
-    @mcp_server.tool(name="get_note_metadata")
-    def get_note_metadata(note_guid: NoteGuid) -> dict:
+    def get_note_metadata(note_guid: NoteGuid) -> dict[str, Any]:
         """Fetch note metadata without returning the full ENML body.
 
         Args:
@@ -148,3 +148,7 @@ def register_read_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGate
         """
 
         return evernote_gateway.get_note_metadata(note_guid=note_guid)
+
+    mcp_server.tool(name="search_notes")(search_notes)
+    mcp_server.tool(name="get_note")(get_note)
+    mcp_server.tool(name="get_note_metadata")(get_note_metadata)

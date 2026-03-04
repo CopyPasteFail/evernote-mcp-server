@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -15,7 +15,7 @@ def _build_saved_access_token(sandbox: bool = False) -> SavedAccessToken:
 
     return SavedAccessToken(
         access_token="saved-token",
-        created_at=datetime.now(UTC).isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         sandbox=sandbox,
     )
 

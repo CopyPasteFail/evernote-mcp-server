@@ -10,10 +10,8 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from shutil import which
-from typing import Callable
+from typing import Any, Callable, Protocol, cast
 from urllib.parse import parse_qs, urlparse
-
-from requests_oauthlib import OAuth1Session
 
 from evernote_mcp.evernote.auth_storage import AuthStorageError, persist_access_token
 
@@ -82,8 +80,6 @@ class OAuthCallbackHttpServer(HTTPServer):
 class OAuthCallbackRequestHandler(BaseHTTPRequestHandler):
     """HTTP request handler that accepts the OAuth redirect callback only."""
 
-    server: OAuthCallbackHttpServer
-
     def do_GET(self) -> None:  # noqa: N802
         """Handle Evernote OAuth callback query and release waiting flow thread.
 
@@ -97,7 +93,9 @@ class OAuthCallbackRequestHandler(BaseHTTPRequestHandler):
         """
 
         parsed_url = urlparse(self.path)
-        if parsed_url.path != self.server.callback_path:
+        callback_http_server = self._oauth_callback_server
+
+        if parsed_url.path != callback_http_server.callback_path:
             self._write_html_response(status_code=404, html_body="<h1>Not Found</h1>")
             return
 
@@ -112,11 +110,11 @@ class OAuthCallbackRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
-        self.server.callback_payload = OAuthCallbackPayload(
+        callback_http_server.callback_payload = OAuthCallbackPayload(
             oauth_token=oauth_token,
             oauth_verifier=oauth_verifier,
         )
-        self.server.callback_event.set()
+        callback_http_server.callback_event.set()
         self._write_html_response(
             status_code=200,
             html_body=(
@@ -129,6 +127,12 @@ class OAuthCallbackRequestHandler(BaseHTTPRequestHandler):
         """Silence default request logs to keep CLI output clean and secret-safe."""
 
         return
+
+    @property
+    def _oauth_callback_server(self) -> OAuthCallbackHttpServer:
+        """Return the request's server as a typed callback server instance."""
+
+        return cast(OAuthCallbackHttpServer, self.server)
 
     def _write_html_response(self, status_code: int, html_body: str) -> None:
         """Write a minimal HTML response for OAuth callback interactions."""
@@ -231,6 +235,45 @@ class OAuthCallbackListener:
         return callback_payload
 
 
+class OAuthSessionProtocol(Protocol):
+    """Typed subset of OAuth session methods used by the bootstrap flow."""
+
+    def authorization_url(self, url: str, request_token: str | None = None, **kwargs: object) -> str:
+        """Build the provider authorization URL from the request token."""
+        ...
+
+    def fetch_request_token(self, url: str, realm: str | None = None, **request_kwargs: object) -> dict[str, str]:
+        """Fetch OAuth request token values from the provider."""
+        ...
+
+    def fetch_access_token(self, url: str, verifier: str | None = None, **request_kwargs: object) -> dict[str, str]:
+        """Exchange verifier for OAuth access token values."""
+        ...
+
+
+def create_oauth_session(**session_kwargs: Any) -> OAuthSessionProtocol:
+    """Construct an OAuth1 session from requests-oauthlib.
+
+    Args:
+        session_kwargs: Keyword arguments forwarded to `OAuth1Session`.
+
+    Returns:
+        Session instance exposing OAuth methods used by this module.
+
+    Raises:
+        OAuthFlowError: If requests-oauthlib is not installed in the environment.
+    """
+
+    try:
+        from requests_oauthlib import OAuth1Session  # type: ignore[reportMissingModuleSource]
+    except ImportError as import_error:  # pragma: no cover - depends on local env packaging
+        raise OAuthFlowError(
+            "Missing dependency 'requests-oauthlib'. Install project dependencies and retry."
+        ) from import_error
+
+    return cast(OAuthSessionProtocol, OAuth1Session(**session_kwargs))
+
+
 def resolve_oauth_endpoints(sandbox: bool) -> OAuthEndpoints:
     """Resolve OAuth endpoint URLs based on sandbox toggle.
 
@@ -263,7 +306,7 @@ def run_oauth_bootstrap(
     listen_port: int = DEFAULT_CALLBACK_PORT,
     callback_url: str | None = None,
     timeout_seconds: int = DEFAULT_AUTH_TIMEOUT_SECONDS,
-    oauth_session_factory: Callable[..., OAuth1Session] = OAuth1Session,
+    oauth_session_factory: Callable[..., OAuthSessionProtocol] = create_oauth_session,
     callback_listener_factory: Callable[[], OAuthCallbackListener] | None = None,
     authorization_url_opener: Callable[[str], bool] | None = None,
     token_persister: Callable[[str, bool], Path] = persist_access_token,
@@ -447,7 +490,10 @@ def _open_authorization_url_via_wsl_powershell(authorization_url: str) -> bool:
     return completed_process.returncode == 0
 
 
-def _fetch_request_token(oauth_request_session: OAuth1Session, request_token_url: str) -> dict[str, str]:
+def _fetch_request_token(
+    oauth_request_session: OAuthSessionProtocol,
+    request_token_url: str,
+) -> dict[str, str]:
     """Fetch and validate the OAuth request token response payload."""
 
     try:
@@ -459,7 +505,10 @@ def _fetch_request_token(oauth_request_session: OAuth1Session, request_token_url
         ) from error
 
 
-def _fetch_access_token(oauth_access_session: OAuth1Session, access_token_url: str) -> dict[str, str]:
+def _fetch_access_token(
+    oauth_access_session: OAuthSessionProtocol,
+    access_token_url: str,
+) -> dict[str, str]:
     """Fetch and validate the OAuth access token response payload."""
 
     try:

@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 CONFIG_DIRECTORY_RELATIVE_PATH = Path(".config") / "evernote-mcp-server"
 XDG_CONFIG_HOME_ENVIRONMENT_VARIABLE = "XDG_CONFIG_HOME"
@@ -138,8 +138,8 @@ def persist_access_token(
     )
     _set_directory_permissions(token_file_path.parent)
 
-    resolved_created_at = created_at or datetime.now(UTC)
-    token_document = {
+    resolved_created_at = created_at or datetime.now(timezone.utc)
+    token_document: dict[str, str | bool] = {
         "access_token": access_token,
         "created_at": resolved_created_at.isoformat(),
         "sandbox": sandbox,
@@ -194,9 +194,10 @@ def _parse_saved_token_document(
             f"Saved token file at {token_file_path} must contain a JSON object."
         )
 
-    raw_access_token = token_document.get("access_token", "")
-    raw_created_at = token_document.get("created_at", "")
-    raw_sandbox = token_document.get("sandbox", False)
+    token_document_dictionary = cast(dict[str, object], token_document)
+    raw_access_token = token_document_dictionary.get("access_token", "")
+    raw_created_at = token_document_dictionary.get("created_at", "")
+    raw_sandbox = token_document_dictionary.get("sandbox", False)
 
     if not isinstance(raw_access_token, str) or not raw_access_token.strip():
         raise AuthStorageError(

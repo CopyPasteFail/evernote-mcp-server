@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
-
-from evernote.edam.type.ttypes import Note, Tag
+from typing import Any, Protocol, cast
 
 from evernote_mcp.evernote.enml import (
     append_plaintext_to_existing_enml,
@@ -17,6 +15,22 @@ from evernote_mcp.evernote.thrift_client import EvernoteThriftClient
 
 class EvernoteApiError(RuntimeError):
     """Raised when the Evernote API layer returns an error."""
+
+
+class NoteLike(Protocol):
+    """Structural type for EDAM Note objects consumed by gateway write operations."""
+
+    content: str | None
+    title: str | None
+    notebookGuid: str | None
+    tagGuids: list[str] | None
+
+
+class TagLike(Protocol):
+    """Structural type for EDAM Tag objects consumed by gateway tag resolution."""
+
+    guid: str | None
+    name: str | None
 
 
 class EvernoteGateway:
@@ -177,15 +191,18 @@ class EvernoteGateway:
             Raises `ValueError` if the stored note content is not valid ENML.
         """
 
-        note = self._call_note_store_method(
+        note = cast(
+            NoteLike,
+            self._call_note_store_method(
             "getNote",
             note_guid,
             True,
             False,
             False,
             False,
+            ),
         )
-        note.content = append_plaintext_to_existing_enml(note.content, plaintext_content)
+        note.content = append_plaintext_to_existing_enml(note.content or "", plaintext_content)
         updated_note = self._call_note_store_method("updateNote", note)
         return self._serialize_evernote_value(updated_note)
 
@@ -206,13 +223,16 @@ class EvernoteGateway:
             Raises `EvernoteApiError` if the note fetch or update fails.
         """
 
-        note = self._call_note_store_method(
+        note = cast(
+            NoteLike,
+            self._call_note_store_method(
             "getNote",
             note_guid,
             False,
             False,
             False,
             False,
+            ),
         )
         note.title = new_title
         updated_note = self._call_note_store_method("updateNote", note)
@@ -238,13 +258,16 @@ class EvernoteGateway:
             note update fails.
         """
 
-        note = self._call_note_store_method(
+        note = cast(
+            NoteLike,
+            self._call_note_store_method(
             "getNote",
             note_guid,
             False,
             False,
             False,
             False,
+            ),
         )
         existing_tag_guids = set(note.tagGuids or [])
         resolved_tag_guids = self._resolve_tag_guids_by_name(tag_names)
@@ -271,13 +294,16 @@ class EvernoteGateway:
             Raises `EvernoteApiError` if note fetch or update fails.
         """
 
-        note = self._call_note_store_method(
+        note = cast(
+            NoteLike,
+            self._call_note_store_method(
             "getNote",
             note_guid,
             False,
             False,
             False,
             False,
+            ),
         )
         note.notebookGuid = destination_notebook_guid
         updated_note = self._call_note_store_method("updateNote", note)
@@ -314,7 +340,10 @@ class EvernoteGateway:
         """
 
         enml_content = build_enml_document(escape_plaintext_for_enml(plaintext_body))
-        note = Note(title=title, content=enml_content)
+        note = cast(
+            NoteLike,
+            self._thrift_client.build_note(title=title, content=enml_content),
+        )
         if notebook_guid:
             note.notebookGuid = notebook_guid
 
@@ -373,12 +402,17 @@ class EvernoteGateway:
         if not normalized_tag_names:
             return []
 
-        existing_tags = self._run_api_call("listTags", self._thrift_client.list_tags)
-        tag_guid_by_name = {
-            tag.name.strip().lower(): tag.guid
-            for tag in existing_tags
-            if getattr(tag, "name", None) and getattr(tag, "guid", None)
-        }
+        existing_tags = cast(
+            list[TagLike],
+            self._run_api_call("listTags", self._thrift_client.list_tags),
+        )
+        tag_guid_by_name: dict[str, str] = {}
+        for tag in existing_tags:
+            tag_name = tag.name
+            tag_guid = tag.guid
+            if not tag_name or not tag_guid:
+                continue
+            tag_guid_by_name[tag_name.strip().lower()] = tag_guid
 
         resolved_tag_guids: list[str] = []
         for normalized_tag_name in normalized_tag_names:
@@ -388,11 +422,17 @@ class EvernoteGateway:
                 resolved_tag_guids.append(existing_guid)
                 continue
 
-            created_tag = self._run_api_call(
+            created_tag = cast(
+                TagLike,
+                self._run_api_call(
                 "createTag",
-                lambda: self._thrift_client.create_tag(Tag(name=normalized_tag_name)),
+                lambda: self._thrift_client.create_tag(
+                    self._thrift_client.build_tag(name=normalized_tag_name)
+                ),
+            ),
             )
-            resolved_tag_guids.append(created_tag.guid)
+            if created_tag.guid:
+                resolved_tag_guids.append(created_tag.guid)
 
         return resolved_tag_guids
 
@@ -491,15 +531,18 @@ class EvernoteGateway:
             return value
 
         if isinstance(value, list):
-            return [self._serialize_evernote_value(item) for item in value]
+            list_value = cast(list[Any], value)
+            return [self._serialize_evernote_value(item) for item in list_value]
 
         if isinstance(value, tuple):
-            return tuple(self._serialize_evernote_value(item) for item in value)
+            tuple_value = cast(tuple[Any, ...], value)
+            return tuple(self._serialize_evernote_value(item) for item in tuple_value)
 
         if isinstance(value, dict):
+            dictionary_value = cast(dict[Any, Any], value)
             return {
                 key: self._serialize_evernote_value(item_value)
-                for key, item_value in value.items()
+                for key, item_value in dictionary_value.items()
             }
 
         if hasattr(value, "__dict__"):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -11,6 +11,7 @@ from evernote_mcp import __main__ as main_module
 pytest.importorskip("evernote")
 
 from evernote_mcp.evernote.client import EvernoteApiError, EvernoteGateway
+from evernote_mcp.evernote.thrift_client import EvernoteThriftClient
 
 
 def test_main_returns_sanitized_fatal_message_without_raw_exception_text(
@@ -32,17 +33,20 @@ def test_main_returns_sanitized_fatal_message_without_raw_exception_text(
     assert "sk-should-not-appear" not in captured_output.err
 
 
-def test_call_note_store_method_raises_sanitized_error_without_raw_exception_text() -> None:
-    """Ensure wrapped Evernote API errors avoid exposing raw upstream message contents."""
+def test_gateway_public_api_raises_sanitized_error_without_raw_exception_text() -> None:
+    """Ensure gateway API errors avoid exposing raw upstream exception message contents."""
 
-    def call_note_store_method(_: str) -> None:
-        raise ValueError("api token should-not-appear")
+    class ExplodingThriftClient:
+        """Test double that raises a secret-bearing exception from listNotebooks."""
 
-    gateway = EvernoteGateway.__new__(EvernoteGateway)
-    gateway._thrift_client = SimpleNamespace(call_note_store_method=call_note_store_method)
+        def list_notebooks(self) -> None:
+            raise ValueError("api token should-not-appear")
+
+    thrift_client = cast(EvernoteThriftClient, cast(Any, ExplodingThriftClient()))
+    gateway = EvernoteGateway(authentication_token="test-token", thrift_client=thrift_client)
 
     with pytest.raises(EvernoteApiError) as raised_error:
-        gateway._call_note_store_method("listNotebooks")
+        gateway.list_notebooks()
 
     assert "ValueError" in str(raised_error.value)
     assert "should-not-appear" not in str(raised_error.value)
