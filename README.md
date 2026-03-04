@@ -202,6 +202,40 @@ source .venv/bin/activate
 make check
 ```
 
+### Basic sanity check (Gemini)
+
+After you install the Gemini MCP config, you can run the following prompt in Gemini CLI to test the MCP:
+
+`Use MCP server "evernote-mcp-server" and call list_notebooks. Return the names of 2 notebooks`
+
+### Install Gemini MCP config (idempotent)
+
+Use the installer script to create or update the `mcpServers` entry without duplicating it on repeated runs.
+
+Install for local Python development mode into user-wide Gemini settings (default path is `~/.gemini/settings.json`):
+
+```bash
+python3 scripts/install_gemini_mcp.py --mode python
+```
+
+Install for Docker mode into user-wide Gemini settings:
+
+```bash
+python3 scripts/install_gemini_mcp.py --mode docker
+```
+
+Install into project-local Gemini settings instead:
+
+```bash
+python3 scripts/install_gemini_mcp.py --mode python --settings-path .gemini/settings.json
+```
+
+Common optional flags:
+
+- `--server-name` to change the key under `mcpServers` (default: `evernote-mcp-server`)
+- `--repo-path` to override Gemini `cwd` (default: this repository root)
+- `--docker-image` and `--docker-volume` to customize Docker mode command
+
 ## Use with an MCP Client
 
 Use this section after the server itself is working. The repository currently documents Gemini CLI because it is the primary supported MCP client for v0.1.
