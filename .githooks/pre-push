@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+should_run_checks="false"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [[ "$remote_ref" == "refs/heads/main" ]]; then
+    should_run_checks="true"
+    break
+  fi
+done
+
+if [[ "$should_run_checks" != "true" ]]; then
+  exit 0
+fi
+
+echo "Detected push to main. Running make check..."
+if ! make check; then
+  echo "Push blocked: checks failed for main." >&2
+  exit 1
+fi
+
+echo "Checks passed for main push."
