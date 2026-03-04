@@ -32,7 +32,81 @@ The architecture is intentionally transport-agnostic: tool modules and Evernote 
 
 `transport/sse.py` exists intentionally as a placeholder. CLI accepts `--transport sse` but returns a clear not-implemented error. SSE is deliberately deferred in v0.1, and adding it later should not require changes to Evernote logic or tool modules.
 
-## 5. Security model
+## 5. MCP tool model and capability discovery
+`src/evernote_mcp/server.py` builds the FastMCP server and registers tool modules. That registration step is where the server's MCP capability surface is defined. MCP clients do not infer what the server can do from Evernote itself. They learn it from the tools exposed by FastMCP.
+
+In practice, every `@mcp_server.tool(...)` decorator adds one callable MCP capability. For write operations, `src/evernote_mcp/tools/write_notes.py` currently exposes:
+- `append_to_note_plaintext`
+- `set_note_title`
+- `add_tags_by_name`
+- `move_note`
+- `create_note`
+
+Those names, together with the read and notebook tools registered from the other modules, are what an MCP client such as Gemini CLI receives when it asks the server for available tools.
+
+FastMCP derives tool metadata directly from the Python function:
+- Tool name comes from the decorator argument, for example `@mcp_server.tool(name="append_to_note_plaintext")`.
+- Tool description comes from the function docstring.
+- Tool input schema comes from the function signature and type hints.
+- Return typing is only loosely described here because the handlers currently return plain `dict` values rather than a stricter typed model.
+
+For example, this handler:
+
+```python
+@mcp_server.tool(name="append_to_note_plaintext")
+def append_to_note_plaintext(note_guid: str, plaintext_content: str) -> dict:
+    """Append plaintext content to an existing note body."""
+```
+
+produces MCP tool metadata equivalent to:
+- name: `append_to_note_plaintext`
+- description: append plaintext content to an existing note body
+- inputs:
+  - `note_guid: string`
+  - `plaintext_content: string`
+
+This means the Python function acts as the tool manifest. There is no separate JSON schema file or handwritten capability catalog.
+
+### 5.1 How clients choose tools
+When an MCP client connects, it performs the normal MCP handshake and requests the tool list from the server. FastMCP responds with the registered tool definitions and schemas. The client then uses that list as its available action set.
+
+For example, if a user asks to add tags to a note, a client such as Gemini CLI can match that request to `add_tags_by_name(note_guid, tag_names)` because:
+- the tool name is semantically aligned with the request
+- the description explains that tags are attached by name
+- the argument schema makes the required inputs explicit
+
+The important architectural point is that tool selection is driven by the registered MCP metadata, not by implicit Evernote knowledge inside the client.
+
+### 5.2 Why write policy enforcement lives in the server
+Write protection is enforced inside the tool handlers, not delegated to client prompting behavior. Every mutating note tool calls `_enforce_write_policy()`, which delegates to `require_writes_enabled()` in `src/evernote_mcp/core/policies.py`.
+
+That gives the server final authority over mutations:
+- a client may attempt to call `create_note`
+- the server checks `READ_ONLY`
+- if writes are disabled, the server raises `WriteAccessError` with a clear message
+
+This is an enforcement boundary, not a hint. Clients can learn from the returned error and adapt their future behavior, but the permission decision is always made server-side.
+
+### 5.3 Why the tool functions are nested
+`register_write_note_tools(...)` defines the handlers as nested functions so each tool can close over shared dependencies without relying on module-level mutable globals.
+
+The nested handlers capture:
+- `evernote_gateway`, which performs the actual Evernote operation
+- `_enforce_write_policy()`, which applies the shared write gate
+
+This keeps registration explicit, preserves dependency injection, and makes `build_mcp_server(...)` easy to test with a substituted gateway instance.
+
+### 5.4 Stable MCP contract over mutable Evernote internals
+The MCP handlers are intentionally thin wrappers. They translate:
+
+1. MCP tool call (`name + arguments`)
+2. into an `EvernoteGateway` method call
+3. which then uses the Thrift client
+4. which finally calls Evernote
+
+This layering keeps the external MCP contract stable even if Evernote-specific implementation details change. Tool names, descriptions, and schemas form the client-facing API surface; `EvernoteGateway` and the Thrift layer remain internal implementation details.
+
+## 6. Security model
 - Runtime auth token source:
   - Saved OAuth token file at `$XDG_CONFIG_HOME/evernote-mcp-server/token.json` when `XDG_CONFIG_HOME` is set; otherwise `~/.config/evernote-mcp-server/token.json`
 - OAuth bootstrap credentials for first-time auth:
@@ -46,7 +120,7 @@ The architecture is intentionally transport-agnostic: tool modules and Evernote 
 
 The default state is read-only, which limits accidental destructive behavior in local and shared environments.
 
-## 6. Evernote API integration: why Thrift
+## 7. Evernote API integration: why Thrift
 Evernote Cloud API endpoints are exposed as EDAM Thrift services (`UserStore` and `NoteStore`).  
 This server now calls those services directly over HTTPS using a small Thrift client layer.
 
@@ -69,7 +143,7 @@ In simple terms:
 - Our code uses generated EDAM types and calls those methods over HTTP.
 - This is still Evernote’s official API, just without the outdated wrapper layer.
 
-## 7. Release model
+## 8. Release model
 - `scripts/release.sh` is the single tag creation entrypoint.
 - It requires clean, synced `main` and passing `make check` before creating an annotated tag.
 - `release.yml` runs only on `v*` tags and enforces:
@@ -79,7 +153,7 @@ In simple terms:
 
 This design prevents off-branch or unvalidated release tags from being published.
 
-## 8. Future improvements
+## 9. Future improvements
 - Implement SSE transport with explicit auth and origin controls; v0.1 intentionally postpones SSE so a remote surface is not shipped before auth, origin, and security boundaries are fully designed.
 - Add structured JSON logging mode.
 - Add focused integration tests with mocked Evernote API responses.

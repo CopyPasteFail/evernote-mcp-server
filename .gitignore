@@ -28,3 +28,6 @@ htmlcov/
 # Build outputs
 build/
 dist/
+
+# Others
+.gemini/
