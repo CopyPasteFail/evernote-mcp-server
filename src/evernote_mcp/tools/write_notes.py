@@ -260,3 +260,28 @@ def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGat
             notebook_guid=notebook_guid,
             tag_names=tag_names,
         )
+
+    @mcp_server.tool(name="delete_note")
+    def delete_note(note_guid: NoteGuid) -> dict:
+        """Move an existing note to Evernote trash (soft delete).
+
+        Args:
+            note_guid: Evernote note GUID returned by `search_notes`.
+
+        Use first:
+            If `note_guid` is unknown, call `search_notes` first.
+            Call `get_note_metadata` first when you need to verify title,
+            notebook, or update timestamp before deleting.
+
+        Returns keys:
+            `guid`, `deleted`, `updateSequenceNum`.
+            `deleted` is `true` when Evernote accepts the request.
+
+        Fails when:
+            Raises `WriteAccessError` when the server is in read-only mode.
+            Raises `EvernoteApiError` if the note does not exist, is not
+            accessible, or the delete request fails.
+        """
+
+        _enforce_write_policy()
+        return evernote_gateway.delete_note(note_guid=note_guid)

@@ -8,7 +8,7 @@ This server exposes Evernote operations as MCP tools. The current tool surface i
 
 - Notebook tools: `list_notebooks`
 - Read tools: `search_notes`, `get_note`, `get_note_metadata`
-- Write tools: `append_to_note_plaintext`, `set_note_title`, `add_tags_by_name`, `move_note`, `create_note`
+- Write tools: `append_to_note_plaintext`, `set_note_title`, `add_tags_by_name`, `move_note`, `create_note`, `delete_note`
 
 The server is transport-aware, but v0.1 is intentionally narrow in scope:
 

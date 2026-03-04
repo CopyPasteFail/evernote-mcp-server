@@ -41,6 +41,7 @@ In practice, every `@mcp_server.tool(...)` decorator adds one callable MCP capab
 - `add_tags_by_name`
 - `move_note`
 - `create_note`
+- `delete_note`
 
 Those names, together with the read and notebook tools registered from the other modules, are what an MCP client such as Gemini CLI receives when it asks the server for available tools.
 

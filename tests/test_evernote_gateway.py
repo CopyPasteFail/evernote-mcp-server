@@ -46,3 +46,21 @@ def test_get_note_metadata_calls_metadata_method_on_thrift_client() -> None:
 
     mocked_thrift_client.get_note_metadata.assert_called_once_with("note-guid")
     assert serialized_note_metadata["guid"] == "note-guid"
+
+
+def test_delete_note_calls_thrift_client_and_returns_serialized_status() -> None:
+    """Ensure note deletion forwards GUID and returns a stable status payload."""
+
+    mocked_thrift_client = SimpleNamespace(
+        delete_note=Mock(return_value=987654),
+    )
+    gateway = EvernoteGateway(authentication_token="token", thrift_client=mocked_thrift_client)
+
+    deletion_result = gateway.delete_note("note-guid")
+
+    mocked_thrift_client.delete_note.assert_called_once_with("note-guid")
+    assert deletion_result == {
+        "guid": "note-guid",
+        "deleted": True,
+        "updateSequenceNum": 987654,
+    }

@@ -114,6 +114,19 @@ class EvernoteThriftClient:
 
         return self.call_note_store_method("createNote", note)
 
+    def delete_note(self, note_guid: str) -> Any:
+        """Move a note to trash using its GUID.
+
+        Args:
+            note_guid: Evernote note GUID for the note to soft-delete.
+
+        Returns:
+            Evernote deleteNote response payload, typically an update sequence
+            number.
+        """
+
+        return self.call_note_store_method("deleteNote", note_guid)
+
     def list_tags(self) -> Any:
         """Return tags visible to the authenticated account."""
 

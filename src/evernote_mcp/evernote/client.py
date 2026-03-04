@@ -324,6 +324,38 @@ class EvernoteGateway:
         created_note = self._call_note_store_method("createNote", note)
         return self._serialize_evernote_value(created_note)
 
+    def delete_note(self, note_guid: str) -> dict[str, Any]:
+        """Move a note to Evernote trash and return deletion status metadata.
+
+        Args:
+            note_guid: Evernote note GUID for the target note.
+
+        Returns:
+            Serialized deletion result dictionary with:
+            - `guid`: Original note GUID that was requested for deletion.
+            - `deleted`: Always `True` when Evernote accepts the request.
+            - `updateSequenceNum`: Evernote USN returned by `deleteNote`, when
+              provided by the API.
+
+        Composition:
+            Used by the `delete_note` MCP tool after note discovery via
+            `search_notes`.
+
+        Failure modes:
+            Raises `EvernoteApiError` if Evernote rejects the deletion request
+            or the note is inaccessible.
+        """
+
+        update_sequence_number = self._run_api_call(
+            "deleteNote",
+            lambda: self._thrift_client.delete_note(note_guid),
+        )
+        return {
+            "guid": note_guid,
+            "deleted": True,
+            "updateSequenceNum": self._serialize_evernote_value(update_sequence_number),
+        }
+
     def _resolve_tag_guids_by_name(self, tag_names: list[str]) -> list[str]:
         """Resolve tag names to GUIDs, creating tags that do not yet exist.
 
