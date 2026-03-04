@@ -1,4 +1,4 @@
 fastmcp
 evernote3
 python-dotenv
-oauth2
+thrift

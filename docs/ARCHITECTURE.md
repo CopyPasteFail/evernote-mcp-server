@@ -42,7 +42,23 @@ The architecture is intentionally transport-agnostic: tool modules and Evernote 
 
 The default state is read-only, which limits accidental destructive behavior in local and shared environments.
 
-## 6. Release model
+## 6. Evernote API integration: why Thrift
+Evernote Cloud API endpoints are exposed as EDAM Thrift services (`UserStore` and `NoteStore`).  
+This server now calls those services directly over HTTPS using a small Thrift client layer.
+
+Why this design:
+- The legacy Python SDK client wrapper depends on an old oauth2 chain that is unreliable on modern Python (including Python 3.13).
+- We only need developer-token authentication for this server, not OAuth flows.
+- A thin Thrift client keeps dependencies smaller and behavior explicit.
+- Optional sandbox (deprecated) routing is supported through `EVERNOTE_SANDBOX=true` for development/testing accounts.
+
+In simple terms:
+- Thrift is a schema + RPC system.
+- Evernote defines service methods and data types in that schema.
+- Our code uses generated EDAM types and calls those methods over HTTP.
+- This is still Evernote’s official API, just without the outdated wrapper layer.
+
+## 7. Release model
 - `scripts/release.sh` is the single tag creation entrypoint.
 - It requires clean, synced `main` and passing `make check` before creating an annotated tag.
 - `release.yml` runs only on `v*` tags and enforces:
@@ -52,7 +68,7 @@ The default state is read-only, which limits accidental destructive behavior in 
 
 This design prevents off-branch or unvalidated release tags from being published.
 
-## 7. Future improvements
+## 8. Future improvements
 - Implement SSE transport with explicit auth and origin controls; v0.1 intentionally postpones SSE so a remote surface is not shipped before auth, origin, and security boundaries are fully designed.
 - Add structured JSON logging mode.
 - Add focused integration tests with mocked Evernote API responses.

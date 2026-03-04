@@ -35,12 +35,11 @@ def test_main_returns_sanitized_fatal_message_without_raw_exception_text(
 def test_call_note_store_method_raises_sanitized_error_without_raw_exception_text() -> None:
     """Ensure wrapped Evernote API errors avoid exposing raw upstream message contents."""
 
-    def list_notebooks_method(_: str) -> None:
+    def call_note_store_method(_: str) -> None:
         raise ValueError("api token should-not-appear")
 
     gateway = EvernoteGateway.__new__(EvernoteGateway)
-    gateway._authentication_token = "test-token"
-    gateway._note_store = SimpleNamespace(listNotebooks=list_notebooks_method)
+    gateway._thrift_client = SimpleNamespace(call_note_store_method=call_note_store_method)
 
     with pytest.raises(EvernoteApiError) as raised_error:
         gateway._call_note_store_method("listNotebooks")

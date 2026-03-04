@@ -7,9 +7,11 @@ from dataclasses import dataclass
 from typing import Mapping
 
 EVERNOTE_TOKEN_ENV_NAME = "EVERNOTE_TOKEN"  # nosec B105
+EVERNOTE_SANDBOX_ENV_NAME = "EVERNOTE_SANDBOX"
 READ_ONLY_ENV_NAME = "READ_ONLY"
 LOG_LEVEL_ENV_NAME = "LOG_LEVEL"
 
+EVERNOTE_SANDBOX_DEFAULT_VALUE = "false"
 READ_ONLY_DEFAULT_VALUE = "true"
 DEFAULT_LOG_LEVEL = "INFO"
 
@@ -27,11 +29,13 @@ class AppConfig:
 
     Attributes:
         evernote_token: Authentication token used for Evernote API requests.
+        evernote_sandbox: Whether to use Evernote's sandbox API endpoints.
         read_only: Whether write operations are blocked by policy.
         log_level: Logging verbosity level for the process.
     """
 
     evernote_token: str
+    evernote_sandbox: bool
     read_only: bool
     log_level: str
 
@@ -104,12 +108,21 @@ def load_config_from_environment(environment: Mapping[str, str] | None = None) -
             f"Missing required environment variable: {EVERNOTE_TOKEN_ENV_NAME}."
         )
 
+    raw_evernote_sandbox = source_environment.get(
+        EVERNOTE_SANDBOX_ENV_NAME,
+        EVERNOTE_SANDBOX_DEFAULT_VALUE,
+    )
+    evernote_sandbox = parse_boolean_environment_value(
+        raw_evernote_sandbox,
+        EVERNOTE_SANDBOX_ENV_NAME,
+    )
     read_only_mode = resolve_read_only_mode(source_environment)
     raw_log_level = source_environment.get(LOG_LEVEL_ENV_NAME, DEFAULT_LOG_LEVEL)
     normalized_log_level = raw_log_level.strip().upper() or DEFAULT_LOG_LEVEL
 
     return AppConfig(
         evernote_token=evernote_token,
+        evernote_sandbox=evernote_sandbox,
         read_only=read_only_mode,
         log_level=normalized_log_level,
     )

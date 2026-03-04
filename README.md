@@ -33,6 +33,8 @@ The server is designed for:
 
 ## 3. Security model
 - `EVERNOTE_TOKEN` is required at startup.
+- Optional: `EVERNOTE_SANDBOX=true` switches Evernote API calls to sandbox endpoints (default `false`). Sandbox availability may be limited or deprecated; most users should leave this as default false.
+
 - `READ_ONLY` defaults to `true`.
 - Every write tool calls shared policy enforcement first.
 - When writes are blocked, tools fail with:
@@ -47,7 +49,7 @@ The server is designed for:
 
 ### Local Python usage (stdio)
 ```bash
-python3 -m venv .venv
+python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
@@ -100,7 +102,7 @@ docker run --rm -i --env-file .env \
 ```bash
 git clone <repo-url>
 cd evernote-mcp-server
-python3 -m venv .venv
+python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env

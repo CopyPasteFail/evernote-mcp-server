@@ -13,6 +13,7 @@ def test_load_config_from_environment_defaults_read_only_to_true() -> None:
     loaded_config = load_config_from_environment(environment_mapping)
 
     assert loaded_config.evernote_token == "token-value"
+    assert loaded_config.evernote_sandbox is False
     assert loaded_config.read_only is True
     assert loaded_config.log_level == "INFO"
 
@@ -30,6 +31,17 @@ def test_load_config_from_environment_accepts_read_only_false() -> None:
     assert loaded_config.log_level == "DEBUG"
 
 
+def test_load_config_from_environment_accepts_evernote_sandbox_true() -> None:
+    environment_mapping = {
+        "EVERNOTE_TOKEN": "token-value",
+        "EVERNOTE_SANDBOX": "true",
+    }
+
+    loaded_config = load_config_from_environment(environment_mapping)
+
+    assert loaded_config.evernote_sandbox is True
+
+
 def test_load_config_from_environment_fails_when_token_missing() -> None:
     with pytest.raises(ConfigurationError, match="EVERNOTE_TOKEN"):
         load_config_from_environment({})
@@ -42,4 +54,14 @@ def test_load_config_from_environment_fails_for_invalid_read_only_value() -> Non
     }
 
     with pytest.raises(ConfigurationError, match="READ_ONLY"):
+        load_config_from_environment(environment_mapping)
+
+
+def test_load_config_from_environment_fails_for_invalid_sandbox_value() -> None:
+    environment_mapping = {
+        "EVERNOTE_TOKEN": "token-value",
+        "EVERNOTE_SANDBOX": "sometimes",
+    }
+
+    with pytest.raises(ConfigurationError, match="EVERNOTE_SANDBOX"):
         load_config_from_environment(environment_mapping)

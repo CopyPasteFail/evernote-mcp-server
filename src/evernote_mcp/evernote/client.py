@@ -1,11 +1,10 @@
-"""Evernote API client wrapper used by MCP tool handlers."""
+"""Evernote API gateway used by MCP tool handlers."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
-from evernote.api.client import EvernoteClient
-from evernote.edam.notestore.ttypes import NoteFilter, NotesMetadataResultSpec
 from evernote.edam.type.ttypes import Note, Tag
 
 from evernote_mcp.evernote.enml import (
@@ -13,6 +12,7 @@ from evernote_mcp.evernote.enml import (
     build_enml_document,
     escape_plaintext_for_enml,
 )
+from evernote_mcp.evernote.thrift_client import EvernoteThriftClient
 
 
 class EvernoteApiError(RuntimeError):
@@ -20,25 +20,44 @@ class EvernoteApiError(RuntimeError):
 
 
 class EvernoteGateway:
-    """Thin service wrapper around Evernote's NoteStore operations.
+    """Thin service wrapper around Evernote NoteStore operations.
 
     Args:
         authentication_token: Evernote API token.
         is_sandbox: Whether to use the sandbox endpoint.
+        thrift_client: Optional injected Thrift client for tests/custom wiring.
+        note_store_url: Optional explicit NoteStore URL override.
+
+    Inputs and outputs:
+        Public methods return JSON-serializable dictionaries/lists consumed by MCP
+        tool handlers.
+
+    Edge cases:
+        The class sanitizes upstream exception messages to avoid leaking sensitive
+        data such as tokens or note content.
 
     Concurrency:
-        This wrapper is stateless besides the underlying SDK client references.
+        This wrapper is stateless besides the Thrift client dependency.
     """
 
-    def __init__(self, authentication_token: str, is_sandbox: bool = False) -> None:
+    def __init__(
+        self,
+        authentication_token: str,
+        is_sandbox: bool = False,
+        thrift_client: EvernoteThriftClient | None = None,
+        note_store_url: str | None = None,
+    ) -> None:
         self._authentication_token = authentication_token
-        self._client = EvernoteClient(token=authentication_token, sandbox=is_sandbox)
-        self._note_store = self._client.get_note_store()
+        self._thrift_client = thrift_client or EvernoteThriftClient(
+            authentication_token=authentication_token,
+            is_sandbox=is_sandbox,
+            note_store_url=note_store_url,
+        )
 
     def list_notebooks(self) -> list[dict[str, Any]]:
         """Return all notebooks visible to the authenticated account."""
 
-        notebooks = self._call_note_store_method("listNotebooks")
+        notebooks = self._run_api_call("listNotebooks", self._thrift_client.list_notebooks)
         return self._serialize_evernote_value(notebooks)
 
     def search_notes(
@@ -58,47 +77,28 @@ class EvernoteGateway:
             Serialized metadata search result payload.
         """
 
-        note_filter = NoteFilter(words=search_query)
-        metadata_spec = NotesMetadataResultSpec(
-            includeTitle=True,
-            includeCreated=True,
-            includeUpdated=True,
-            includeNotebookGuid=True,
-            includeTagGuids=True,
-        )
-
-        search_result = self._call_note_store_method(
+        search_result = self._run_api_call(
             "findNotesMetadata",
-            note_filter,
-            offset,
-            max_results,
-            metadata_spec,
+            lambda: self._thrift_client.search_notes_metadata(
+                search_query=search_query,
+                offset=offset,
+                max_results=max_results,
+            ),
         )
         return self._serialize_evernote_value(search_result)
 
     def get_note(self, note_guid: str) -> dict[str, Any]:
         """Fetch full note details including ENML content for a note GUID."""
 
-        note = self._call_note_store_method(
-            "getNote",
-            note_guid,
-            True,
-            False,
-            False,
-            False,
-        )
+        note = self._run_api_call("getNote", lambda: self._thrift_client.get_note(note_guid))
         return self._serialize_evernote_value(note)
 
     def get_note_metadata(self, note_guid: str) -> dict[str, Any]:
         """Fetch note metadata without full content payload."""
 
-        note = self._call_note_store_method(
+        note = self._run_api_call(
             "getNote",
-            note_guid,
-            False,
-            False,
-            False,
-            False,
+            lambda: self._thrift_client.get_note_metadata(note_guid),
         )
         return self._serialize_evernote_value(note)
 
@@ -185,13 +185,23 @@ class EvernoteGateway:
         return self._serialize_evernote_value(created_note)
 
     def _resolve_tag_guids_by_name(self, tag_names: list[str]) -> list[str]:
-        """Resolve tag names to GUIDs, creating tags that do not yet exist."""
+        """Resolve tag names to GUIDs, creating tags that do not yet exist.
+
+        Args:
+            tag_names: Candidate tag names from user input.
+
+        Returns:
+            Ordered list of resolved GUIDs matching normalized tag names.
+
+        Edge cases:
+            Empty strings and case-insensitive duplicates are removed.
+        """
 
         normalized_tag_names = self._normalize_tag_names(tag_names)
         if not normalized_tag_names:
             return []
 
-        existing_tags = self._call_note_store_method("listTags")
+        existing_tags = self._run_api_call("listTags", self._thrift_client.list_tags)
         tag_guid_by_name = {
             tag.name.strip().lower(): tag.guid
             for tag in existing_tags
@@ -206,7 +216,10 @@ class EvernoteGateway:
                 resolved_tag_guids.append(existing_guid)
                 continue
 
-            created_tag = self._call_note_store_method("createTag", Tag(name=normalized_tag_name))
+            created_tag = self._run_api_call(
+                "createTag",
+                lambda: self._thrift_client.create_tag(Tag(name=normalized_tag_name)),
+            )
             resolved_tag_guids.append(created_tag.guid)
 
         return resolved_tag_guids
@@ -231,30 +244,41 @@ class EvernoteGateway:
         return normalized_tag_names
 
     def _call_note_store_method(self, method_name: str, *arguments: Any) -> Any:
-        """Invoke a NoteStore method while handling token style differences.
+        """Invoke a NoteStore method through the Thrift client.
 
         Args:
             method_name: Name of the NoteStore method.
             *arguments: Method arguments excluding the auth token.
 
         Returns:
-            Raw SDK response object.
+            Raw Thrift response object.
 
-        Raises:
-            EvernoteApiError: If the request fails.
+        Security:
+            Any exception is wrapped into a sanitized `EvernoteApiError` that omits
+            raw upstream message text.
         """
 
-        note_store_method = getattr(self._note_store, method_name, None)
-        if note_store_method is None:
-            raise EvernoteApiError(f"Evernote NoteStore does not provide method '{method_name}'.")
+        return self._run_api_call(
+            method_name,
+            lambda: self._thrift_client.call_note_store_method(method_name, *arguments),
+        )
+
+    def _run_api_call(self, method_name: str, method_callable: Callable[[], Any]) -> Any:
+        """Execute an API call and convert failures into sanitized gateway errors.
+
+        Args:
+            method_name: Logical Evernote API method name for error context.
+            method_callable: Callable that performs the actual API request.
+
+        Returns:
+            The raw API response value.
+
+        Concurrency:
+            This helper is stateless and safe to call concurrently.
+        """
 
         try:
-            return note_store_method(self._authentication_token, *arguments)
-        except TypeError:
-            try:
-                return note_store_method(*arguments)
-            except Exception as error:
-                raise self._build_safe_api_error(method_name, error) from error
+            return method_callable()
         except Exception as error:
             raise self._build_safe_api_error(method_name, error) from error
 
@@ -279,7 +303,17 @@ class EvernoteGateway:
         )
 
     def _serialize_evernote_value(self, value: Any) -> Any:
-        """Convert Thrift-style Evernote objects to JSON-serializable Python values."""
+        """Convert Thrift-style Evernote objects to JSON-serializable Python values.
+
+        Args:
+            value: Arbitrary scalar, container, or Thrift object.
+
+        Returns:
+            Recursively serialized value containing only JSON-friendly Python types.
+
+        Edge cases:
+            Unknown object types are converted to string as a fallback.
+        """
 
         if isinstance(value, (str, int, float, bool)) or value is None:
             return value

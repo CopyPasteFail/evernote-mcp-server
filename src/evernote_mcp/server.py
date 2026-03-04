@@ -35,7 +35,8 @@ def build_mcp_server(
     set_read_only_mode(resolved_config.read_only)
 
     resolved_evernote_gateway = evernote_gateway or EvernoteGateway(
-        authentication_token=resolved_config.evernote_token
+        authentication_token=resolved_config.evernote_token,
+        is_sandbox=resolved_config.evernote_sandbox,
     )
 
     mcp_server = FastMCP("evernote-mcp-server")
