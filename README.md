@@ -306,6 +306,8 @@ Use the release script to create and push the next semantic version tag from `ma
 
 Supported bump types are `patch`, `minor`, and `major`.
 
+If tag push is rejected with `GH013` and `creations being restricted`, your repository tag ruleset is blocking tag creation for your actor. Add a bypass actor (maintainer user/team/app) to the `v*` tag ruleset, then run the release command again.
+
 ### Release Workflow Behavior
 
 The release process is guarded:
@@ -331,6 +333,8 @@ Suggested one-time setup for release tag protection rules:
 ```bash
 ./scripts/setup-tag-protection.sh
 ```
+
+Important: tag protection rules that restrict creation must include an explicit bypass actor for the maintainer identity that runs `./scripts/release.sh`, otherwise all tag pushes are blocked.
 
 Both scripts use an authenticated GitHub CLI session to apply repository settings.
 

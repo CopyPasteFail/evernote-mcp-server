@@ -147,6 +147,7 @@ In simple terms:
 ## 8. Release model
 - `scripts/release.sh` is the single tag creation entrypoint.
 - It requires clean, synced `main` and passing `make check` before creating an annotated tag.
+- If GitHub rulesets restrict `refs/tags/v*` creation, the maintainer release actor must be configured as a bypass actor; otherwise release tag pushes are rejected.
 - `release.yml` runs only on `v*` tags and enforces:
   1. tag commit reachable from `origin/main`
   2. checks pass (`make check`)
