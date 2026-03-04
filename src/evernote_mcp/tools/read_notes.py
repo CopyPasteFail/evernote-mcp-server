@@ -16,9 +16,9 @@ SearchQuery = Annotated[
     str,
     Field(
         description=(
-            "Evernote search expression. Use plain keywords or Evernote operators "
-            "such as intitle:, notebook:, tag:, or created:. Use this tool first "
-            "when you need a note GUID for follow-up read or write operations."
+            "Evernote search expression. Supports plain keywords and operators such "
+            "as intitle:, notebook:, tag:, and created:. Use search_notes first to "
+            "find note GUIDs for all note-specific tools."
         )
     ),
 ]
@@ -27,8 +27,8 @@ SearchOffset = Annotated[
     Field(
         ge=0,
         description=(
-            "Zero-based pagination offset. Use 0 for the first page, then advance "
-            "by the previous max_results value to inspect additional matches."
+            "Zero-based result offset. Use 0 for the first page, then add the "
+            "previous max_results value for the next page."
         ),
     ),
 ]
@@ -37,9 +37,9 @@ SearchMaxResults = Annotated[
     Field(
         ge=1,
         description=(
-            "Maximum number of matches to return. Smaller pages such as 5-20 "
-            "usually make it easier to identify the correct note before reading "
-            "or mutating it."
+            "Maximum matches in one page. Use smaller values (for example 5-10) "
+            "when disambiguating similar notes, and larger values for broad "
+            "scans."
         ),
     ),
 ]
@@ -48,8 +48,8 @@ NoteGuid = Annotated[
     Field(
         min_length=1,
         description=(
-            "Evernote note GUID returned by search_notes. Pass the GUID exactly as "
-            "returned; do not rewrite or infer it."
+            "Evernote note GUID from search_notes notes[].guid. Pass it unchanged "
+            "as note_guid to note-specific tools."
         ),
     ),
 ]
@@ -69,36 +69,29 @@ def register_read_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGate
         offset: SearchOffset = DEFAULT_SEARCH_OFFSET,
         max_results: SearchMaxResults = DEFAULT_SEARCH_MAX_RESULTS,
     ) -> dict:
-        """Search note metadata and return candidate notes, not full note bodies.
+        """Search note metadata only. This tool does not return ENML note content.
 
         Args:
             search_query: Evernote query string. Examples include plain text such
                 as `meeting notes`, or structured filters such as
-                `intitle:roadmap`, `notebook:Work tag:urgent`, or
-                `created:day-7`. Use this tool first when you need a `note_guid`
-                for `get_note`, `get_note_metadata`, or any write tool.
+                `intitle:roadmap`, `notebook:Work tag:urgent`, or `created:day-7`.
             offset: Zero-based pagination offset. Use `0` for the first page.
-            max_results: Positive page size. Smaller result pages reduce
-                ambiguity and make it easier to pick the correct note.
+            max_results: Positive page size.
 
-        Returns:
-            Dictionary with keys commonly including:
-                `notes`: list of matching note metadata objects. Each item
-                    commonly includes `guid`, `title`, `created`, `updated`,
-                    `notebookGuid`, and `tagGuids`.
-                `startIndex`: offset used for the returned page.
-                `totalNotes`: total number of matches across all pages.
-            Evernote may include additional metadata fields.
+        Use first:
+            Use before `get_note`, `get_note_metadata`, and all write tools when
+            you do not already know the target `note_guid`.
+            When many notes look similar, start with a smaller `max_results`,
+            inspect top matches, then refine `search_query`.
 
-        Composition:
-            Use this tool before any note-specific read or write action.
-            Feed a returned note `guid` into `get_note`, `get_note_metadata`,
-            `append_to_note_plaintext`, `set_note_title`, `add_tags_by_name`,
-            or `move_note`.
+        Returns keys:
+            `notes`, `startIndex`, `totalNotes`.
+            `notes[]` items usually include `guid`, `title`, `created`,
+            `updated`, `notebookGuid`, and `tagGuids`.
+            Use `notes[i].guid` as `note_guid` in follow-up tools.
 
-        Failure modes:
-            Raises `EvernoteApiError` if the Evernote search request fails or
-            the upstream transport is unavailable.
+        Fails when:
+            Raises `EvernoteApiError` if the Evernote search request fails.
         """
 
         return evernote_gateway.search_notes(
@@ -114,27 +107,17 @@ def register_read_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGate
         Args:
             note_guid: Evernote note GUID returned by `search_notes`.
 
-        Returns:
-            Dictionary with keys commonly including:
-                `guid`: stable Evernote note identifier.
-                `title`: current note title.
-                `content`: full note body as ENML, not plain text.
-                `contentLength`: serialized ENML length.
-                `created`, `updated`, `deleted`: Evernote timestamps when
-                    available.
-                `notebookGuid`: parent notebook GUID.
-                `tagGuids`: attached Evernote tag GUIDs.
-                `attributes`: nested note metadata when available.
+        Use first:
+            If `note_guid` is unknown, call `search_notes` first.
+            Prefer `get_note_metadata` when title/notebook/tag checks are enough,
+            so you avoid loading full ENML content.
+
+        Returns keys:
+            `guid`, `title`, `content`, `contentLength`, `created`, `updated`,
+            `deleted`, `notebookGuid`, `tagGuids`, `attributes`.
             Evernote may include additional fields.
 
-        Composition:
-            Use `search_notes` first if you do not already have the note GUID.
-            Prefer `get_note_metadata` when you only need identifiers,
-            timestamps, notebook placement, or tags.
-            Use this tool before `append_to_note_plaintext` when you need to
-            inspect the current body and avoid duplicate edits.
-
-        Failure modes:
+        Fails when:
             Raises `EvernoteApiError` if the note does not exist, is not
             accessible to the token, or the Evernote API request fails.
         """
@@ -148,24 +131,18 @@ def register_read_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGate
         Args:
             note_guid: Evernote note GUID returned by `search_notes`.
 
-        Returns:
-            Dictionary with keys commonly including:
-                `guid`: stable Evernote note identifier.
-                `title`: current note title.
-                `created`, `updated`, `deleted`: Evernote timestamps when
-                    available.
-                `notebookGuid`: parent notebook GUID.
-                `tagGuids`: attached Evernote tag GUIDs.
-                `attributes`: nested note metadata when available.
-            This tool intentionally omits the large `content` field.
+        Use first:
+            If `note_guid` is unknown, call `search_notes` first.
+            Prefer this tool over `get_note` when body content is unnecessary.
 
-        Composition:
-            Use `search_notes` first to resolve the correct `note_guid`.
-            Prefer this tool over `get_note` when you only need identifiers or
-            note placement before calling `move_note`, `add_tags_by_name`, or
-            `set_note_title`.
+        Returns keys:
+            `guid`, `title`, `created`, `updated`, `deleted`, `notebookGuid`,
+            `tagGuids`, `attributes`.
+            This tool intentionally omits `content`.
+            Use `guid` as `note_guid` for write tools, and use `notebookGuid` to
+            validate move targets before `move_note`.
 
-        Failure modes:
+        Fails when:
             Raises `EvernoteApiError` if the note does not exist, is not
             accessible to the token, or the Evernote API request fails.
         """

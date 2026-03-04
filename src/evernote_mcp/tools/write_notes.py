@@ -15,8 +15,8 @@ NoteGuid = Annotated[
     Field(
         min_length=1,
         description=(
-            "Evernote note GUID returned by search_notes. Pass the GUID exactly "
-            "as returned by Evernote."
+            "Evernote note GUID from search_notes notes[].guid. Pass it unchanged "
+            "as note_guid. Also use create_note result guid for follow-up edits."
         ),
     ),
 ]
@@ -24,8 +24,8 @@ PlaintextContent = Annotated[
     str,
     Field(
         description=(
-            "Plain text to store in the note. Do not send ENML or HTML. Newlines "
-            "are preserved when converted to Evernote ENML."
+            "Plain text content. Do not send ENML or HTML. Newlines are "
+            "preserved when converted to Evernote ENML."
         )
     ),
 ]
@@ -33,8 +33,7 @@ NoteTitle = Annotated[
     str,
     Field(
         description=(
-            "Human-readable note title. Keep it concise and pass the full desired "
-            "title value."
+            "Full human-readable note title value."
         )
     ),
 ]
@@ -43,8 +42,8 @@ NotebookGuid = Annotated[
     Field(
         min_length=1,
         description=(
-            "Notebook GUID returned by list_notebooks. Pass it unchanged to place "
-            "or move a note into that notebook."
+            "Evernote notebook GUID from list_notebooks[].guid. Pass it unchanged "
+            "as notebook_guid or destination_notebook_guid."
         ),
     ),
 ]
@@ -52,9 +51,9 @@ TagNames = Annotated[
     list[str],
     Field(
         description=(
-            "List of human-readable tag names. Blank names are ignored and "
-            "duplicates are removed case-insensitively. Missing tags are created "
-            "automatically."
+            "List of human-readable tag names. Blank names are ignored, "
+            "duplicates are removed case-insensitively, and missing tags are "
+            "created automatically."
         )
     ),
 ]
@@ -62,8 +61,8 @@ OptionalNotebookGuid = Annotated[
     str | None,
     Field(
         description=(
-            "Optional notebook GUID from list_notebooks. Omit to create the note "
-            "in Evernote's default notebook."
+            "Optional notebook GUID from list_notebooks[].guid. Omit to create in "
+            "Evernote's default notebook."
         )
     ),
 ]
@@ -71,8 +70,8 @@ OptionalTagNames = Annotated[
     list[str] | None,
     Field(
         description=(
-            "Optional list of tag names to attach during note creation. Missing "
-            "tags are created automatically."
+            "Optional tag names to attach during creation. Missing tags are "
+            "created automatically."
         )
     ),
 ]
@@ -109,22 +108,16 @@ def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGat
                 Newlines are preserved and the text is appended inside a new
                 ENML `<div>`.
 
-        Returns:
-            Updated note dictionary with keys commonly including:
-                `guid`: stable Evernote note identifier.
-                `title`: current note title.
-                `content`: full ENML body after the append.
-                `updated`: Evernote update timestamp.
-                `notebookGuid`: current notebook GUID.
-                `tagGuids`: attached Evernote tag GUIDs.
+        Use first:
+            If `note_guid` is unknown, call `search_notes` first.
+            Call `get_note` first when you need to inspect current trailing
+            content and avoid duplicate or out-of-order appends.
+
+        Returns keys:
+            `guid`, `title`, `content`, `updated`, `notebookGuid`, `tagGuids`.
             Evernote may include additional fields.
 
-        Composition:
-            Use `search_notes` first to resolve the correct `note_guid`.
-            Use `get_note` first when you need to inspect the current body and
-            avoid duplicate or misplaced appends.
-
-        Failure modes:
+        Fails when:
             Raises `WriteAccessError` when the server is in read-only mode.
             Raises `EvernoteApiError` if the note cannot be fetched or updated.
             Raises `ValueError` if the existing note body is not valid ENML.
@@ -144,21 +137,17 @@ def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGat
             note_guid: Evernote note GUID returned by `search_notes`.
             new_title: Full title string that should replace the existing title.
 
-        Returns:
-            Updated note dictionary with keys commonly including:
-                `guid`: stable Evernote note identifier.
-                `title`: updated note title.
-                `updated`: Evernote update timestamp.
-                `notebookGuid`: current notebook GUID.
-                `tagGuids`: attached Evernote tag GUIDs when available.
+        Use first:
+            If `note_guid` is unknown, call `search_notes` first.
+            Call `get_note_metadata` first when you need to confirm current title
+            or notebook placement without loading full ENML content, or to avoid
+            renaming to an already-correct title.
+
+        Returns keys:
+            `guid`, `title`, `updated`, `notebookGuid`, `tagGuids`.
             Evernote may include additional fields.
 
-        Composition:
-            Use `search_notes` first to resolve the note.
-            Use `get_note_metadata` first if you want to confirm the existing
-            title before changing it.
-
-        Failure modes:
+        Fails when:
             Raises `WriteAccessError` when the server is in read-only mode.
             Raises `EvernoteApiError` if the note does not exist, the title is
             rejected by Evernote, or the update request fails.
@@ -176,22 +165,17 @@ def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGat
             tag_names: Human-readable tag names. Blank strings are ignored and
                 duplicates are removed case-insensitively before the update.
 
-        Returns:
-            Updated note dictionary with keys commonly including:
-                `guid`: stable Evernote note identifier.
-                `title`: note title.
-                `tagGuids`: complete set of attached Evernote tag GUIDs after the
-                    update.
-                `updated`: Evernote update timestamp.
-                `notebookGuid`: current notebook GUID.
-            The response contains Evernote tag GUIDs, not the original tag names.
+        Use first:
+            If `note_guid` is unknown, call `search_notes` first.
+            Call `get_note_metadata` first when you need existing `tagGuids`
+            without loading full ENML content, especially to avoid redundant
+            retagging.
 
-        Composition:
-            Use `search_notes` first to resolve the note.
-            Use `get_note_metadata` first if you need to inspect the note's
-            current `tagGuids` before adding more tags.
+        Returns keys:
+            `guid`, `title`, `tagGuids`, `updated`, `notebookGuid`.
+            The response includes Evernote tag GUIDs, not original tag names.
 
-        Failure modes:
+        Fails when:
             Raises `WriteAccessError` when the server is in read-only mode.
             Raises `EvernoteApiError` if the note update fails or Evernote
             cannot list or create tags.
@@ -209,23 +193,19 @@ def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGat
             destination_notebook_guid: Notebook GUID returned by
                 `list_notebooks`.
 
-        Returns:
-            Updated note dictionary with keys commonly including:
-                `guid`: stable Evernote note identifier.
-                `title`: note title.
-                `notebookGuid`: updated destination notebook GUID.
-                `updated`: Evernote update timestamp.
-                `tagGuids`: attached Evernote tag GUIDs when available.
+        Use first:
+            If `note_guid` is unknown, call `search_notes` first.
+            Call `list_notebooks` first to resolve
+            `destination_notebook_guid`.
+            Call `get_note_metadata` when you need notebook/tag checks without
+            loading full ENML content, especially to avoid moving to the current
+            notebook by mistake.
+
+        Returns keys:
+            `guid`, `title`, `notebookGuid`, `updated`, `tagGuids`.
             Evernote may include additional fields.
 
-        Composition:
-            Use `search_notes` first to resolve the note to move.
-            Use `list_notebooks` first to find the destination
-            `destination_notebook_guid`.
-            Use `get_note_metadata` before or after the move if you need to
-            confirm notebook placement without fetching full ENML content.
-
-        Failure modes:
+        Fails when:
             Raises `WriteAccessError` when the server is in read-only mode.
             Raises `EvernoteApiError` if the note or destination notebook is not
             accessible or the update request fails.
@@ -256,24 +236,18 @@ def register_write_note_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGat
                 are created automatically. Blank names are ignored and
                 duplicates are removed case-insensitively.
 
-        Returns:
-            Created note dictionary with keys commonly including:
-                `guid`: new Evernote note GUID for later reads or edits.
-                `title`: created note title.
-                `content`: ENML body generated from the provided plain text.
-                `created`, `updated`: Evernote timestamps.
-                `notebookGuid`: notebook GUID used for creation.
-                `tagGuids`: attached Evernote tag GUIDs when tags were applied.
-            Evernote may include additional fields.
-
-        Composition:
-            Use `list_notebooks` first when the note must go into a specific
+        Use first:
+            Call `list_notebooks` first when the note must go to a specific
             notebook.
-            The returned `guid` can be passed directly into `get_note`,
-            `get_note_metadata`, `append_to_note_plaintext`,
-            `set_note_title`, `add_tags_by_name`, or `move_note`.
+            Call `search_notes` first when duplicate notes are possible and you
+            need to confirm a similar title does not already exist.
 
-        Failure modes:
+        Returns keys:
+            `guid`, `title`, `content`, `created`, `updated`, `notebookGuid`,
+            `tagGuids`.
+            Use returned `guid` as `note_guid` in all note-specific tools.
+
+        Fails when:
             Raises `WriteAccessError` when the server is in read-only mode.
             Raises `EvernoteApiError` if Evernote rejects the note creation,
             the notebook is invalid, or tag creation fails.

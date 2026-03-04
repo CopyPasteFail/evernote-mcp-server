@@ -19,23 +19,20 @@ def register_notebook_tools(mcp_server: FastMCP, evernote_gateway: EvernoteGatew
     def list_notebooks() -> list[dict]:
         """List notebooks available to the authenticated Evernote account.
 
-        Returns:
-            List of notebook dictionaries. Each item commonly includes:
-                `guid`: notebook GUID used by `create_note` and `move_note`.
-                `name`: human-readable notebook name.
-                `defaultNotebook`: whether Evernote treats this as the default.
-                `serviceCreated`, `serviceUpdated`: Evernote timestamps when
-                    available.
-                `stack`: notebook stack name when configured.
-            Evernote may include additional notebook metadata fields.
+        Use first:
+            Use before `create_note` or `move_note` when you need a target
+            notebook GUID.
+            Also use when you need to map `get_note_metadata.notebookGuid` to a
+            human-readable notebook name before deciding a move.
 
-        Composition:
-            Use this tool before `create_note` when the note must be created in a
-            specific notebook.
-            Use this tool before `move_note` to resolve the destination
-            `notebook_guid`.
+        Returns keys:
+            List of notebook objects. Each item usually includes `guid`, `name`,
+            `defaultNotebook`, `serviceCreated`, `serviceUpdated`, and `stack`.
+            Use `notebooks[i].guid` as `notebook_guid` or
+            `destination_notebook_guid` in write tools, and compare with
+            note `notebookGuid` values from note read tools.
 
-        Failure modes:
+        Fails when:
             Raises `EvernoteApiError` if notebook listing fails or the upstream
             Evernote request cannot be completed.
         """
