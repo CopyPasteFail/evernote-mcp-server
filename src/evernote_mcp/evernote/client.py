@@ -55,7 +55,20 @@ class EvernoteGateway:
         )
 
     def list_notebooks(self) -> list[dict[str, Any]]:
-        """Return all notebooks visible to the authenticated account."""
+        """Return serialized notebooks visible to the authenticated account.
+
+        Returns:
+            List of notebook dictionaries. Each item commonly includes `guid`,
+            `name`, `defaultNotebook`, `serviceCreated`, `serviceUpdated`, and
+            `stack`.
+
+        Composition:
+            Used by the `list_notebooks` MCP tool and by callers that need a
+            notebook GUID before `create_note` or `move_note`.
+
+        Failure modes:
+            Raises `EvernoteApiError` if Evernote notebook listing fails.
+        """
 
         notebooks = self._run_api_call("listNotebooks", self._thrift_client.list_notebooks)
         return self._serialize_evernote_value(notebooks)
@@ -66,15 +79,24 @@ class EvernoteGateway:
         offset: int = 0,
         max_results: int = 20,
     ) -> dict[str, Any]:
-        """Search notes using Evernote's note metadata search endpoint.
+        """Search notes using Evernote's metadata search endpoint.
 
         Args:
-            search_query: Evernote search syntax string.
-            offset: Zero-based offset into result set.
-            max_results: Maximum number of notes to return.
+            search_query: Evernote search syntax string such as plain keywords
+                or structured filters like `intitle:`, `notebook:`, or `tag:`.
+            offset: Zero-based offset into the result set.
+            max_results: Positive page size for the metadata result list.
 
         Returns:
-            Serialized metadata search result payload.
+            Serialized metadata search payload with keys commonly including
+            `notes`, `startIndex`, and `totalNotes`.
+
+        Composition:
+            Used by the `search_notes` MCP tool as the discovery step for note
+            GUIDs consumed by all note-specific read and write operations.
+
+        Failure modes:
+            Raises `EvernoteApiError` if Evernote search fails.
         """
 
         search_result = self._run_api_call(
@@ -88,13 +110,46 @@ class EvernoteGateway:
         return self._serialize_evernote_value(search_result)
 
     def get_note(self, note_guid: str) -> dict[str, Any]:
-        """Fetch full note details including ENML content for a note GUID."""
+        """Fetch a full note record, including ENML content, for a note GUID.
+
+        Args:
+            note_guid: Evernote note GUID returned by a prior metadata search.
+
+        Returns:
+            Serialized note dictionary commonly including `guid`, `title`,
+            `content`, `contentLength`, `created`, `updated`, `notebookGuid`,
+            `tagGuids`, and `attributes`.
+
+        Composition:
+            Used by the `get_note` MCP tool and by callers that need the current
+            ENML body before computing follow-up edits.
+
+        Failure modes:
+            Raises `EvernoteApiError` if the note fetch fails.
+        """
 
         note = self._run_api_call("getNote", lambda: self._thrift_client.get_note(note_guid))
         return self._serialize_evernote_value(note)
 
     def get_note_metadata(self, note_guid: str) -> dict[str, Any]:
-        """Fetch note metadata without full content payload."""
+        """Fetch note metadata without the full ENML content payload.
+
+        Args:
+            note_guid: Evernote note GUID returned by a prior metadata search.
+
+        Returns:
+            Serialized note dictionary commonly including `guid`, `title`,
+            `created`, `updated`, `notebookGuid`, `tagGuids`, and `attributes`,
+            but intentionally omitting `content`.
+
+        Composition:
+            Used by the `get_note_metadata` MCP tool and by write flows that
+            need current note placement or identifiers without fetching body
+            content.
+
+        Failure modes:
+            Raises `EvernoteApiError` if the note fetch fails.
+        """
 
         note = self._run_api_call(
             "getNote",
@@ -103,7 +158,24 @@ class EvernoteGateway:
         return self._serialize_evernote_value(note)
 
     def append_to_note_plaintext(self, note_guid: str, plaintext_content: str) -> dict[str, Any]:
-        """Append plaintext to the ENML body of an existing note and persist it."""
+        """Append plain text to an existing note body and persist the update.
+
+        Args:
+            note_guid: Evernote note GUID for the target note.
+            plaintext_content: Plain text to append. Newlines are preserved and
+                the text is escaped before insertion into ENML.
+
+        Returns:
+            Serialized updated note dictionary, including the new ENML `content`.
+
+        Composition:
+            Used by the `append_to_note_plaintext` MCP tool after a caller has
+            already resolved the target note GUID.
+
+        Failure modes:
+            Raises `EvernoteApiError` if the note fetch or update fails.
+            Raises `ValueError` if the stored note content is not valid ENML.
+        """
 
         note = self._call_note_store_method(
             "getNote",
@@ -118,7 +190,21 @@ class EvernoteGateway:
         return self._serialize_evernote_value(updated_note)
 
     def set_note_title(self, note_guid: str, new_title: str) -> dict[str, Any]:
-        """Update and persist a note's title."""
+        """Replace a note title and persist the update.
+
+        Args:
+            note_guid: Evernote note GUID for the target note.
+            new_title: Full replacement title string.
+
+        Returns:
+            Serialized updated note dictionary with the new `title`.
+
+        Composition:
+            Used by the `set_note_title` MCP tool after note discovery.
+
+        Failure modes:
+            Raises `EvernoteApiError` if the note fetch or update fails.
+        """
 
         note = self._call_note_store_method(
             "getNote",
@@ -133,7 +219,24 @@ class EvernoteGateway:
         return self._serialize_evernote_value(updated_note)
 
     def add_tags_by_name(self, note_guid: str, tag_names: list[str]) -> dict[str, Any]:
-        """Attach tags to a note, creating missing tags by name when needed."""
+        """Attach tags to a note, creating missing tags by name when needed.
+
+        Args:
+            note_guid: Evernote note GUID for the target note.
+            tag_names: Human-readable tag names. Blank values are ignored and
+                duplicates are removed case-insensitively.
+
+        Returns:
+            Serialized updated note dictionary with the full `tagGuids` set.
+
+        Composition:
+            Used by the `add_tags_by_name` MCP tool. This method converts
+            user-facing tag names into Evernote tag GUIDs before persistence.
+
+        Failure modes:
+            Raises `EvernoteApiError` if note fetch, tag listing/creation, or
+            note update fails.
+        """
 
         note = self._call_note_store_method(
             "getNote",
@@ -150,7 +253,23 @@ class EvernoteGateway:
         return self._serialize_evernote_value(updated_note)
 
     def move_note(self, note_guid: str, destination_notebook_guid: str) -> dict[str, Any]:
-        """Move a note to another notebook and persist the update."""
+        """Move a note to another notebook and persist the update.
+
+        Args:
+            note_guid: Evernote note GUID for the target note.
+            destination_notebook_guid: Evernote notebook GUID returned by a
+                notebook listing call.
+
+        Returns:
+            Serialized updated note dictionary with the new `notebookGuid`.
+
+        Composition:
+            Used by the `move_note` MCP tool after notebook discovery via
+            `list_notebooks`.
+
+        Failure modes:
+            Raises `EvernoteApiError` if note fetch or update fails.
+        """
 
         note = self._call_note_store_method(
             "getNote",
@@ -171,7 +290,28 @@ class EvernoteGateway:
         notebook_guid: str | None = None,
         tag_names: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Create a new note from plaintext content and optional notebook/tag metadata."""
+        """Create a new note from plain text content and optional metadata.
+
+        Args:
+            title: Human-readable note title.
+            plaintext_body: Plain text note body. It is escaped and wrapped in
+                ENML before being sent to Evernote.
+            notebook_guid: Optional notebook GUID. When omitted, Evernote uses
+                the default notebook.
+            tag_names: Optional human-readable tag names to resolve and attach.
+
+        Returns:
+            Serialized created note dictionary commonly including `guid`,
+            `title`, `content`, `created`, `updated`, `notebookGuid`, and
+            `tagGuids`.
+
+        Composition:
+            Used by the `create_note` MCP tool. The returned `guid` becomes the
+            input for all subsequent note-specific tools.
+
+        Failure modes:
+            Raises `EvernoteApiError` if note creation or tag resolution fails.
+        """
 
         enml_content = build_enml_document(escape_plaintext_for_enml(plaintext_body))
         note = Note(title=title, content=enml_content)
