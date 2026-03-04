@@ -333,21 +333,21 @@ The GitHub release workflow runs only for tags matching `v*`. It verifies that t
 
 ### Optional repository hardening scripts
 
-These scripts are maintainer utilities, not part of normal development or runtime setup.
+These optional scripts are maintainer-only repository hardening utilities. They are not part of normal development or runtime setup and typically only need to be run once per repository.
 
-Set up Dependabot defaults and vulnerability alerts:
+Suggested one-time setup for Dependabot defaults and vulnerability alerts:
 
 ```bash
 ./scripts/setup-dependabot.sh
 ```
 
-Apply release tag protection rules:
+Suggested one-time setup for release tag protection rules:
 
 ```bash
 ./scripts/setup-tag-protection.sh
 ```
 
-Both scripts expect an authenticated GitHub CLI session.
+Both scripts use an authenticated GitHub CLI session to apply repository settings.
 
 ## Troubleshooting
 
