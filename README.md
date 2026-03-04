@@ -140,8 +140,6 @@ PYTHONPATH=src python -m evernote_mcp --transport stdio
 python3 scripts/install_gemini_mcp.py --mode python
 ```
 
-`scripts/install_gemini_mcp.py` is development-only and intended for contributor workflows (local Python and locally built Docker image modes).
-
 ## Contributor Workflow
 
 ### Run development checks
