@@ -44,11 +44,19 @@ ruleset_payload_file="$(mktemp)"
 ruleset_error_output_file="$(mktemp)"
 trap 'rm -f "$ruleset_payload_file" "$ruleset_error_output_file"' EXIT
 
+# RepositoryRole actor_id 5 allows repository admin/maintainer bypass for release-tag creation in this repo's release flow.
 cat > "$ruleset_payload_file" <<'JSON'
 {
   "name": "Protect release tags",
   "target": "tag",
   "enforcement": "active",
+  "bypass_actors": [
+    {
+      "actor_type": "RepositoryRole",
+      "actor_id": 5,
+      "bypass_mode": "always"
+    }
+  ],
   "conditions": {
     "ref_name": {
       "include": ["refs/tags/v*"],
@@ -108,6 +116,7 @@ fi
 
 if [[ "$ruleset_success" == "true" ]]; then
   echo "Tag protection configured successfully via rulesets API."
+  echo "Ruleset includes maintainer/admin bypass for release tag creation."
   exit 0
 fi
 
