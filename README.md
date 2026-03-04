@@ -144,13 +144,13 @@ docker run --rm -i --env-file .env \
 
 ## 7. Gemini CLI
 Gemini CLI is the primary supported local MCP client in v0.1. Exact config shape can vary by Gemini CLI version, but the important values are:
-- command: `python`
-- args: `-m evernote_mcp --transport stdio`
-- environment:
-  - `EVERNOTE_CONSUMER_KEY`
-  - `EVERNOTE_CONSUMER_SECRET`
-  - optional `READ_ONLY` (defaults to `true`)
-  - optional `EVERNOTE_SANDBOX` (defaults to `false`)
+- `command`: the Python executable used to launch the MCP server
+- `args`: starts `evernote_mcp` over stdio with `-m evernote_mcp --transport stdio`
+- `environment`: the server reads these values from its process environment, which can come from exported variables or the auto-loaded `.env` when launched from the repo root
+  - `EVERNOTE_CONSUMER_KEY`: Evernote API consumer key
+  - `EVERNOTE_CONSUMER_SECRET`: Evernote API consumer secret
+  - `READ_ONLY`: optional flag that keeps write operations disabled; defaults to `true`
+  - `EVERNOTE_SANDBOX`: optional flag that targets the Evernote sandbox environment; defaults to `false`
 
 Gemini CLI settings can be user-wide in `~/.gemini/settings.json` or project-specific in `.gemini/settings.json` at the repo root.
 
