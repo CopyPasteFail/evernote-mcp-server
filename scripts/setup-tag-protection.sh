@@ -11,7 +11,7 @@ Manual fallback (GitHub UI):
 2. Go to Rules -> Rulesets.
 3. Create a new ruleset targeting Tags.
 4. Set name to "Protect release tags".
-5. Add target pattern include: v*
+5. Add target pattern include: v* (or refs/tags/v* if GitHub UI requires a fully-qualified ref pattern)
 6. Add a rule that restricts tag creation to maintainers/admins.
 7. Save and verify contributors cannot create v* tags.
 FALLBACK
@@ -33,10 +33,16 @@ repository_name="${repo_name_with_owner##*/}"
 
 echo "Applying tag protection (best effort) for ${repo_name_with_owner} (${TAG_PATTERN})..."
 
-existing_ruleset_id="$(gh api "/repos/${owner_name}/${repository_name}/rulesets" --jq ".[] | select(.name == \"${RULESET_NAME}\") | .id" 2>/dev/null | head -n 1 || true)"
+existing_ruleset_id="$(gh api \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  "/repos/${owner_name}/${repository_name}/rulesets" \
+  --jq ".[] | select(.name == \"${RULESET_NAME}\") | .id" \
+  2>/dev/null | head -n 1 || true)"
 
 ruleset_payload_file="$(mktemp)"
-trap 'rm -f "$ruleset_payload_file"' EXIT
+ruleset_error_output_file="$(mktemp)"
+trap 'rm -f "$ruleset_payload_file" "$ruleset_error_output_file"' EXIT
 
 cat > "$ruleset_payload_file" <<'JSON'
 {
@@ -45,7 +51,7 @@ cat > "$ruleset_payload_file" <<'JSON'
   "enforcement": "active",
   "conditions": {
     "ref_name": {
-      "include": ["v*"],
+      "include": ["refs/tags/v*"],
       "exclude": []
     }
   },
@@ -53,35 +59,50 @@ cat > "$ruleset_payload_file" <<'JSON'
     {
       "type": "creation"
     }
-  ],
-  "bypass_actors": [
-    {
-      "actor_type": "RepositoryRole",
-      "actor_id": 5,
-      "bypass_mode": "always"
-    }
   ]
 }
 JSON
 
 ruleset_success="false"
 if [[ -n "$existing_ruleset_id" ]]; then
+  : >"$ruleset_error_output_file"
   if gh api \
-    --silent \
     -X PUT \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
     "/repos/${owner_name}/${repository_name}/rulesets/${existing_ruleset_id}" \
-    --input "$ruleset_payload_file"; then
+    --input "$ruleset_payload_file" \
+    >/dev/null \
+    2>"$ruleset_error_output_file"; then
     ruleset_success="true"
     echo "Updated existing tag ruleset (${existing_ruleset_id})."
+  else
+    echo "Rulesets API update failed for ruleset id ${existing_ruleset_id}." >&2
+    if [[ -s "$ruleset_error_output_file" ]]; then
+      echo "--- gh api error output ---" >&2
+      cat "$ruleset_error_output_file" >&2
+      echo >&2
+    fi
   fi
 else
+  : >"$ruleset_error_output_file"
   if gh api \
-    --silent \
     -X POST \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
     "/repos/${owner_name}/${repository_name}/rulesets" \
-    --input "$ruleset_payload_file"; then
+    --input "$ruleset_payload_file" \
+    >/dev/null \
+    2>"$ruleset_error_output_file"; then
     ruleset_success="true"
     echo "Created new tag ruleset."
+  else
+    echo "Rulesets API create failed." >&2
+    if [[ -s "$ruleset_error_output_file" ]]; then
+      echo "--- gh api error output ---" >&2
+      cat "$ruleset_error_output_file" >&2
+      echo >&2
+    fi
   fi
 fi
 
@@ -90,18 +111,7 @@ if [[ "$ruleset_success" == "true" ]]; then
   exit 0
 fi
 
-echo "Rulesets API attempt failed. Trying legacy tag-protection endpoint..." >&2
-if gh api \
-  --silent \
-  -X POST \
-  -H "Accept: application/vnd.github+json" \
-  "/repos/${owner_name}/${repository_name}/tags/protection" \
-  -f pattern="$TAG_PATTERN"; then
-  echo "Tag protection configured successfully via legacy tag-protection API."
-  exit 0
-fi
-
 echo "Automatic tag protection setup did not complete." >&2
-echo "Note: GitHub ruleset/tag-protection APIs and payload shape can change over time." >&2
+echo "Note: GitHub rulesets API and payload shape can change over time." >&2
 print_ui_fallback
 exit 1

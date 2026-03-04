@@ -13,6 +13,7 @@ venv/
 # Local secrets
 .env
 .env.*
+!.env.example
 
 # Coverage and logs
 .coverage

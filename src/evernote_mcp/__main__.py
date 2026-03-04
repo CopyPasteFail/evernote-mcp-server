@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+from dotenv import load_dotenv
+
 from evernote_mcp.core.config import ConfigurationError, load_config_from_environment
 
 SUPPORTED_TRANSPORT_CHOICES = ("stdio", "sse")
@@ -73,6 +75,21 @@ def format_safe_fatal_error_message(unhandled_error: Exception) -> str:
     )
 
 
+def load_environment_from_dotenv() -> None:
+    """Load `.env` values into the process environment when present.
+
+    Behavior:
+        Reads `.env` from the current working directory if it exists.
+        Existing environment variables are preserved and not overridden.
+        Missing `.env` files are ignored without raising an error.
+
+    Security:
+        No environment values are logged by this function.
+    """
+
+    load_dotenv(override=False)
+
+
 def main() -> int:
     """Run the Evernote MCP CLI process.
 
@@ -80,6 +97,7 @@ def main() -> int:
         Integer process exit code.
     """
 
+    load_environment_from_dotenv()
     argument_parser = build_argument_parser()
     parsed_arguments = argument_parser.parse_args()
 

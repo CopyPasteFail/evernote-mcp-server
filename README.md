@@ -1,15 +1,15 @@
 # evernote-mcp-server
 
 ## 1. Project overview
-`evernote-mcp-server` is a production-style MCP server for Evernote, implemented in Python 3.11 with `fastmcp`.
+`evernote-mcp-server` is a production-style MCP server for Evernote, implemented in Python 3.13 with `fastmcp`.
 
 The server is designed for:
-- secure defaults (`READ_ONLY=true`)
-- local usage over stdio, with Gemini CLI as the primary supported MCP client in v0.1
-- distribution as a Docker image via GHCR
-- clean transport separation so SSE can be added later without rewriting tool logic
+- Secure defaults (`READ_ONLY=true`)
+- Local usage over stdio, with Gemini CLI as the primary supported MCP client in v0.1
+- Distribution as a Docker image via GHCR
+- Clean transport separation so SSE can be added later without rewriting tool logic
 
-v0.1 implements stdio only.
+> v0.1 implements stdio only.
 
 ## 2. Features
 - Read tools:
@@ -41,9 +41,9 @@ v0.1 implements stdio only.
 
 ## 4. Quickstart for users
 ### Prerequisites
-- Python 3.11
+- Python 3.13
 - Evernote token (`EVERNOTE_TOKEN`)
-- For Windows users: run these commands inside WSL Ubuntu 22.04
+- For Windows users: run these commands inside WSL (confirmed with Ubuntu)
 
 ### Local Python usage (stdio)
 ```bash
@@ -51,12 +51,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-export EVERNOTE_TOKEN="your-token"
-export READ_ONLY=true
+cp .env.example .env
+# Edit .env and set EVERNOTE_TOKEN (READ_ONLY defaults to true)
 export PYTHONPATH=src
 
 python -m evernote_mcp
 ```
+
+`.env` is auto-loaded at startup when present. Existing environment variables are preserved (for example shell exports, Docker `-e`, or CI variables). It is loaded from the current working directory, so run commands from the repo root (or mount `.env` to `/app/.env` in Docker as shown below).
 
 Explicit stdio selection:
 ```bash
@@ -79,17 +81,19 @@ Gemini CLI is the primary supported local MCP client in v0.1. Exact MCP client c
 ```bash
 docker build -t evernote-mcp-server:local .
 
+# Option 1: pass vars with an env file
+docker run --rm -i --env-file .env \
+  evernote-mcp-server:local
+
+# Option 2: mount .env to /app/.env for automatic dotenv loading
 docker run --rm -i \
-  -e EVERNOTE_TOKEN="your-token" \
-  -e READ_ONLY=true \
+  -v "$(pwd)/.env:/app/.env:ro" \
   evernote-mcp-server:local
 ```
 
 GHCR image example:
 ```bash
-docker run --rm -i \
-  -e EVERNOTE_TOKEN="your-token" \
-  -e READ_ONLY=true \
+docker run --rm -i --env-file .env \
   ghcr.io/<owner>/evernote-mcp-server:v0.1.0
 ```
 
@@ -101,6 +105,8 @@ cd evernote-mcp-server
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
+cp .env.example .env
+# Edit .env and set EVERNOTE_TOKEN
 ```
 
 ### Enable repository pre-push hook
