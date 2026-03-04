@@ -57,8 +57,8 @@ Pick one. You do not need both.
 ### 4.1 One-time: create `.env`
 ```bash
 cp .env.example .env
-# Edit .env and set EVERNOTE_CONSUMER_KEY / EVERNOTE_CONSUMER_SECRET
 ```
+Edit `.env` and set `EVERNOTE_CONSUMER_KEY` and `EVERNOTE_CONSUMER_SECRET`
 
 `.env` is auto-loaded at startup when present. Run commands from the repo root so `.env` is discovered.
 
@@ -161,8 +161,8 @@ python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
-# Edit .env and set EVERNOTE_CONSUMER_KEY / EVERNOTE_CONSUMER_SECRET
 ```
+Edit `.env` and set `EVERNOTE_CONSUMER_KEY` and `EVERNOTE_CONSUMER_SECRET`
 
 ### 8.2 Bootstrap auth once
 ```bash
