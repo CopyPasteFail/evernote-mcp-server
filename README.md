@@ -208,7 +208,7 @@ After you install the Gemini MCP config, you can run the following prompt in Gem
 
 `Use MCP server "evernote-mcp-server" and call list_notebooks. Return the names of 2 notebooks`
 
-### Install Gemini MCP config (idempotent)
+### Install Gemini MCP config
 
 Use the installer script to create or update the `mcpServers` entry without duplicating it on repeated runs.
 
