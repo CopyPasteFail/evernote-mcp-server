@@ -52,6 +52,27 @@ def run_server_with_transport(transport_name: str) -> None:
     run_stdio_transport(mcp_server)
 
 
+def format_safe_fatal_error_message(unhandled_error: Exception) -> str:
+    """Format a fatal error message without exposing raw exception text.
+
+    Args:
+        unhandled_error: Uncaught exception raised during startup or runtime.
+
+    Returns:
+        Human-readable message with exception type only.
+
+    Security:
+        The original exception message is not included because upstream libraries
+        may embed sensitive values such as auth tokens or note content.
+    """
+
+    exception_type_name = type(unhandled_error).__name__
+    return (
+        "Fatal error: unexpected "
+        f"{exception_type_name}. Check application logs for additional context."
+    )
+
+
 def main() -> int:
     """Run the Evernote MCP CLI process.
 
@@ -71,7 +92,7 @@ def main() -> int:
         print(not_implemented_error, file=sys.stderr)
         return 3
     except Exception as unhandled_error:  # pragma: no cover
-        print(f"Fatal error: {unhandled_error}", file=sys.stderr)
+        print(format_safe_fatal_error_message(unhandled_error), file=sys.stderr)
         return 1
 
     return 0

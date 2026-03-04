@@ -254,11 +254,29 @@ class EvernoteGateway:
             try:
                 return note_store_method(*arguments)
             except Exception as error:
-                raise EvernoteApiError(
-                    f"Evernote API call '{method_name}' failed: {error}"
-                ) from error
+                raise self._build_safe_api_error(method_name, error) from error
         except Exception as error:
-            raise EvernoteApiError(f"Evernote API call '{method_name}' failed: {error}") from error
+            raise self._build_safe_api_error(method_name, error) from error
+
+    def _build_safe_api_error(self, method_name: str, error: Exception) -> EvernoteApiError:
+        """Build a sanitized API error message that avoids leaking sensitive payload data.
+
+        Args:
+            method_name: Name of the NoteStore method that failed.
+            error: Original exception from the SDK or transport layer.
+
+        Returns:
+            EvernoteApiError containing method context and exception type only.
+
+        Security:
+            Exception messages are intentionally excluded because they can contain
+            authentication tokens, request details, or note content.
+        """
+
+        exception_type_name = type(error).__name__
+        return EvernoteApiError(
+            f"Evernote API call '{method_name}' failed with {exception_type_name}."
+        )
 
     def _serialize_evernote_value(self, value: Any) -> Any:
         """Convert Thrift-style Evernote objects to JSON-serializable Python values."""

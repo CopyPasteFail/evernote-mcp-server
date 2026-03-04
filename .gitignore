@@ -10,6 +10,10 @@ __pycache__/
 .venv/
 venv/
 
+# Local secrets
+.env
+.env.*
+
 # Coverage and logs
 .coverage
 htmlcov/
