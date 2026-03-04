@@ -106,15 +106,36 @@ Edit the generated env file before you try OAuth bootstrap. At minimum, fill in 
 
 ### Run One-Time OAuth Bootstrap
 
-After the env file is populated, run the one-time OAuth bootstrap command. The installer prints the exact command that matches the configured image tag and volume.
+After the env file is populated, initialize Docker volume ownership once, then run the one-time OAuth bootstrap command. The installer prints both commands with the configured image tag and volume.
 
-It will look like this:
+Docker named volumes may initially be owned by root, while this image runs as non-root `appuser`. Initializing the volume ownership once avoids token save failures:
 
 ```bash
-docker run --rm -it --env-file ~/.config/evernote-mcp-server/evernote-mcp.env -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server ghcr.io/CopyPasteFail/evernote-mcp-server:<tag> python -m evernote_mcp auth
+docker run --rm --user root \
+  -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server \
+  ghcr.io/CopyPasteFail/evernote-mcp-server:latest \
+  python -c "import os; p='/home/appuser/.config/evernote-mcp-server'; os.makedirs(p, exist_ok=True); os.chown(p, 1000, 1000); os.chmod(p, 0o700)"
+```
+
+Then run container auth:
+
+```bash
+docker run --rm -it \
+  --env-file ~/.config/evernote-mcp-server/evernote-mcp.env \
+  -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server \
+  -p 8765:8765 \
+  ghcr.io/CopyPasteFail/evernote-mcp-server:latest \
+  python -m evernote_mcp auth \
+    --listen-host 0.0.0.0 \
+    --listen-port 8765 \
+    --callback-url http://127.0.0.1:8765/callback
 ```
 
 OAuth bootstrap opens a browser for Evernote authorization and then saves the token into the mounted config volume so Gemini can reuse it on later runs.
+
+Why this works: the listener binds inside the container (`0.0.0.0:8765`) while Evernote redirects to a host-visible callback URL (`127.0.0.1:8765`) through the published Docker port.
+
+> **WSL Note**: Browser auto-open may still fail in some environments; the CLI prints the authorization URL so you can open it manually.
 
 ## Contributor Setup
 
@@ -162,10 +183,51 @@ Use this path when you want local code changes packaged in a container while kee
 
 ```bash
 docker build -t evernote-mcp-server:local .
+docker volume create evernote-mcp-auth
+```
+
+Initialize volume ownership once:
+
+```bash
+docker run --rm --user root \
+  -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server \
+  evernote-mcp-server:local \
+  python -c "import os; p='/home/appuser/.config/evernote-mcp-server'; os.makedirs(p, exist_ok=True); os.chown(p, 1000, 1000); os.chmod(p, 0o700)"
+```
+
+Then run container auth:
+
+```bash
+docker run --rm -it \
+  --env-file .env \
+  -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server \
+  -p 8765:8765 \
+  evernote-mcp-server:local \
+  python -m evernote_mcp auth \
+    --listen-host 0.0.0.0 \
+    --listen-port 8765 \
+    --callback-url http://127.0.0.1:8765/callback
+```
+
+Then configure Gemini for local Docker mode:
+
+```bash
 python3 scripts/install_gemini_mcp.py --mode docker
 ```
 
-After the local image is built and Gemini settings are updated, run OAuth bootstrap against the same local Docker runtime you plan to use so the saved token is available inside the Docker-backed config directory.
+After OAuth bootstrap and Gemini setup, runtime uses the same Docker volume
+
+You can sanity-check that the volume now has the token by running:
+
+```bash
+docker run --rm -it \
+  -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server \
+  evernote-mcp-server:local \
+  python -c "from pathlib import Path; p=Path('/home/appuser/.config/evernote-mcp-server/token.json'); print(p.exists(), p)"
+```
+
+It should print `True` and the path.
+
 
 ## Verify the Installation
 

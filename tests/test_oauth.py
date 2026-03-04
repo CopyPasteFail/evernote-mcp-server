@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 from types import SimpleNamespace
+import types
+from urllib.parse import urlparse
 
 import pytest
 
+try:
+    import requests_oauthlib as _requests_oauthlib  # noqa: F401
+except ModuleNotFoundError:  # pragma: no cover - local test env compatibility
+    sys.modules["requests_oauthlib"] = types.SimpleNamespace(OAuth1Session=object)
+
 from evernote_mcp.evernote import oauth as oauth_module
+from evernote_mcp.evernote.auth_storage import AuthStorageError
 from evernote_mcp.evernote.oauth import (
     OAuthBootstrapResult,
+    OAuthCallbackListener,
     OAuthCallbackPayload,
     OAuthEndpoints,
     OAuthFlowError,
@@ -163,6 +173,38 @@ def test_run_oauth_bootstrap_fails_when_callback_token_mismatches_request_token(
         )
 
 
+def test_run_oauth_bootstrap_wraps_token_persistence_failure_with_actionable_error() -> None:
+    """Ensure token write failures are surfaced as actionable OAuth flow errors."""
+
+    request_session = _StubRequestTokenSession()
+    access_session = _StubAccessTokenSession()
+    callback_listener = _StubCallbackListener(
+        OAuthCallbackPayload(
+            oauth_token="request-oauth-token",
+            oauth_verifier="oauth-verifier",
+        )
+    )
+
+    def build_oauth_session(**kwargs: str) -> _StubRequestTokenSession | _StubAccessTokenSession:
+        if "resource_owner_key" in kwargs:
+            return access_session
+        return request_session
+
+    def fail_token_persist(_access_token: str, _sandbox: bool) -> Path:
+        raise AuthStorageError("Failed writing saved token file at /tmp/token.json.")
+
+    with pytest.raises(OAuthFlowError, match="token file could not be written"):
+        run_oauth_bootstrap(
+            consumer_key="consumer-key",
+            consumer_secret="consumer-secret",
+            sandbox=False,
+            oauth_session_factory=build_oauth_session,
+            callback_listener_factory=lambda: callback_listener,
+            authorization_url_opener=lambda _authorization_url: True,
+            token_persister=fail_token_persist,
+        )
+
+
 def test_resolve_oauth_endpoints_returns_sandbox_endpoints_when_enabled() -> None:
     """Ensure sandbox mode resolves all OAuth URLs to sandbox host."""
 
@@ -207,3 +249,111 @@ def test_open_authorization_url_prefers_wsl_powershell_when_available(
 
     assert open_authorization_url("https://example.com/oauth") is True
     assert subprocess_invocations[0][0].endswith("powershell.exe")
+
+
+def test_callback_listener_returns_explicit_callback_url_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure listener can bind one address while returning an explicit callback URL."""
+
+    class _FakeHttpServer:
+        def __init__(
+            self,
+            server_address: tuple[str, int],
+            handler_class: type[object],
+            callback_path: str,
+        ) -> None:
+            del handler_class
+            self.server_address = (
+                server_address[0],
+                41555 if server_address[1] == 0 else server_address[1],
+            )
+            self.callback_path = callback_path
+
+        def serve_forever(self, poll_interval: float = 0.2) -> None:
+            del poll_interval
+
+        def shutdown(self) -> None:
+            return
+
+        def server_close(self) -> None:
+            return
+
+    class _FakeThread:
+        def __init__(self, target, kwargs, daemon: bool) -> None:
+            del target, kwargs, daemon
+
+        def start(self) -> None:
+            return
+
+        def join(self, timeout: float = 1.0) -> None:
+            del timeout
+            return
+
+    monkeypatch.setattr(oauth_module, "OAuthCallbackHttpServer", _FakeHttpServer)
+    monkeypatch.setattr(oauth_module.threading, "Thread", _FakeThread)
+
+    explicit_callback_url = "http://127.0.0.1:8765/callback"
+    with OAuthCallbackListener(
+        callback_host="0.0.0.0",
+        callback_port=0,
+        explicit_callback_url=explicit_callback_url,
+    ) as callback_listener:
+        assert callback_listener.callback_url == explicit_callback_url
+        assert callback_listener._http_server is not None
+        assert callback_listener._http_server.server_address[0] == "0.0.0.0"
+        assert callback_listener._http_server.server_address[1] > 0
+
+
+def test_callback_listener_derives_callback_url_from_random_bound_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure random-port binding still returns a callback URL with actual port."""
+
+    class _FakeHttpServer:
+        def __init__(
+            self,
+            server_address: tuple[str, int],
+            handler_class: type[object],
+            callback_path: str,
+        ) -> None:
+            del handler_class
+            self.server_address = (
+                server_address[0],
+                40111 if server_address[1] == 0 else server_address[1],
+            )
+            self.callback_path = callback_path
+
+        def serve_forever(self, poll_interval: float = 0.2) -> None:
+            del poll_interval
+
+        def shutdown(self) -> None:
+            return
+
+        def server_close(self) -> None:
+            return
+
+    class _FakeThread:
+        def __init__(self, target, kwargs, daemon: bool) -> None:
+            del target, kwargs, daemon
+
+        def start(self) -> None:
+            return
+
+        def join(self, timeout: float = 1.0) -> None:
+            del timeout
+            return
+
+    monkeypatch.setattr(oauth_module, "OAuthCallbackHttpServer", _FakeHttpServer)
+    monkeypatch.setattr(oauth_module.threading, "Thread", _FakeThread)
+
+    with OAuthCallbackListener(
+        callback_host="127.0.0.1",
+        callback_port=0,
+    ) as callback_listener:
+        parsed_callback_url = urlparse(callback_listener.callback_url)
+
+        assert parsed_callback_url.scheme == "http"
+        assert parsed_callback_url.hostname == "127.0.0.1"
+        assert parsed_callback_url.path == "/callback"
+        assert parsed_callback_url.port == 40111

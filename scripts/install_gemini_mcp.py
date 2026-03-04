@@ -274,6 +274,21 @@ def main() -> int:
             f"'{arguments.server_name}' is already configured."
         )
 
+    if arguments.mode == "docker":
+        print(
+            "Docker auth tip: initialize volume ownership once with "
+            f"`docker run --rm --user root -v {arguments.docker_volume}:"
+            f"/home/appuser/.config/evernote-mcp-server {arguments.docker_image} "
+            "python -c \"import os; p='/home/appuser/.config/evernote-mcp-server'; "
+            "os.makedirs(p, exist_ok=True); os.chown(p, 1000, 1000); "
+            "os.chmod(p, 0o700)\"` then run OAuth with "
+            f"`docker run --rm -it --env-file .env -v {arguments.docker_volume}:"
+            "/home/appuser/.config/evernote-mcp-server -p 8765:8765 "
+            f"{arguments.docker_image} python -m evernote_mcp auth "
+            "--listen-host 0.0.0.0 --listen-port 8765 "
+            "--callback-url http://127.0.0.1:8765/callback`."
+        )
+
     return 0
 
 

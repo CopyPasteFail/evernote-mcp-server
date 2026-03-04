@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -16,6 +17,57 @@ from evernote_mcp.evernote.oauth import OAuthFlowError, run_oauth_bootstrap
 
 SUPPORTED_TRANSPORT_CHOICES = ("stdio", "sse")
 SUPPORTED_COMMAND_CHOICES = ("serve", "auth")
+DEFAULT_AUTH_LISTEN_HOST = "127.0.0.1"
+DEFAULT_AUTH_LISTEN_PORT = 0
+
+
+def parse_listen_port(port_value: str) -> int:
+    """Parse and validate OAuth callback listener port values.
+
+    Args:
+        port_value: Raw CLI string provided for `--listen-port`.
+
+    Returns:
+        Parsed integer port value in range 0-65535.
+
+    Raises:
+        argparse.ArgumentTypeError: When value is not an integer in valid range.
+    """
+
+    try:
+        parsed_port = int(port_value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "Invalid --listen-port value. Expected an integer in range 0-65535."
+        ) from error
+
+    if parsed_port < 0 or parsed_port > 65535:
+        raise argparse.ArgumentTypeError(
+            "Invalid --listen-port value. Expected an integer in range 0-65535."
+        )
+
+    return parsed_port
+
+
+def parse_callback_url(callback_url_value: str) -> str:
+    """Parse and validate OAuth callback URL values.
+
+    Args:
+        callback_url_value: Raw CLI string provided for `--callback-url`.
+
+    Returns:
+        Original callback URL string when validation succeeds.
+
+    Raises:
+        argparse.ArgumentTypeError: When URL is not absolute HTTP.
+    """
+
+    parsed_url = urlparse(callback_url_value)
+    if parsed_url.scheme != "http" or not parsed_url.netloc:
+        raise argparse.ArgumentTypeError(
+            "Invalid --callback-url value. Expected an absolute HTTP URL."
+        )
+    return callback_url_value
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -38,6 +90,32 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default="stdio",
         choices=SUPPORTED_TRANSPORT_CHOICES,
         help="Transport to use (v0.1 supports stdio only).",
+    )
+    argument_parser.add_argument(
+        "--listen-host",
+        default=DEFAULT_AUTH_LISTEN_HOST,
+        help=(
+            "OAuth callback listener host for `auth` command "
+            f"(default: {DEFAULT_AUTH_LISTEN_HOST})."
+        ),
+    )
+    argument_parser.add_argument(
+        "--listen-port",
+        default=DEFAULT_AUTH_LISTEN_PORT,
+        type=parse_listen_port,
+        help=(
+            "OAuth callback listener port for `auth` command "
+            f"(default: {DEFAULT_AUTH_LISTEN_PORT}, where 0 selects a random free port)."
+        ),
+    )
+    argument_parser.add_argument(
+        "--callback-url",
+        default=None,
+        type=parse_callback_url,
+        help=(
+            "OAuth callback URL sent to Evernote for `auth` command. "
+            "Must be an absolute HTTP URL."
+        ),
     )
     return argument_parser
 
@@ -67,7 +145,11 @@ def run_server_with_transport(transport_name: str) -> None:
     run_stdio_transport(mcp_server)
 
 
-def run_auth_command() -> None:
+def run_auth_command(
+    listen_host: str,
+    listen_port: int,
+    callback_url: str | None,
+) -> None:
     """Run one-time OAuth bootstrap and persist the resulting access token.
 
     Raises:
@@ -80,6 +162,9 @@ def run_auth_command() -> None:
         consumer_key=oauth_bootstrap_config.consumer_key,
         consumer_secret=oauth_bootstrap_config.consumer_secret,
         sandbox=oauth_bootstrap_config.sandbox,
+        listen_host=listen_host,
+        listen_port=listen_port,
+        callback_url=callback_url,
     )
     print(
         "Evernote OAuth bootstrap succeeded. "
@@ -136,7 +221,11 @@ def main() -> int:
 
     try:
         if parsed_arguments.command == "auth":
-            run_auth_command()
+            run_auth_command(
+                listen_host=parsed_arguments.listen_host,
+                listen_port=parsed_arguments.listen_port,
+                callback_url=parsed_arguments.callback_url,
+            )
         else:
             run_server_with_transport(parsed_arguments.transport)
     except ConfigurationError as configuration_error:

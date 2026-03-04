@@ -309,7 +309,33 @@ print_next_steps() {
   local docker_volume_name="$2"
   local docker_image="$3"
   local server_name="$4"
+  local volume_initialize_command
   local oauth_bootstrap_command
+
+  volume_initialize_command="$(
+    python3 - <<'PY' "$docker_volume_name" "$docker_image"
+import shlex
+import sys
+
+docker_volume_name = sys.argv[1]
+docker_image = sys.argv[2]
+
+docker_command_parts = [
+    "docker",
+    "run",
+    "--rm",
+    "--user",
+    "root",
+    "-v",
+    f"{docker_volume_name}:/home/appuser/.config/evernote-mcp-server",
+    docker_image,
+    "python",
+    "-c",
+    "import os; p='/home/appuser/.config/evernote-mcp-server'; os.makedirs(p, exist_ok=True); os.chown(p, 1000, 1000); os.chmod(p, 0o700)",
+]
+print(" ".join(shlex.quote(part) for part in docker_command_parts))
+PY
+  )"
 
   oauth_bootstrap_command="$(
     python3 - <<'PY' "$env_file_path" "$docker_volume_name" "$docker_image"
@@ -329,11 +355,19 @@ docker_command_parts = [
     env_file_path,
     "-v",
     f"{docker_volume_name}:/home/appuser/.config/evernote-mcp-server",
+    "-p",
+    "8765:8765",
     docker_image,
     "python",
     "-m",
     "evernote_mcp",
     "auth",
+    "--listen-host",
+    "0.0.0.0",
+    "--listen-port",
+    "8765",
+    "--callback-url",
+    "http://127.0.0.1:8765/callback",
 ]
 print(" ".join(shlex.quote(part) for part in docker_command_parts))
 PY
@@ -343,9 +377,11 @@ PY
   echo "Next steps:"
   echo "1. Edit your env file and fill Evernote credentials:"
   echo "   $env_file_path"
-  echo "2. Run one-time OAuth bootstrap:"
+  echo "2. Initialize Docker volume ownership once (needed for non-root container writes):"
+  echo "   $volume_initialize_command"
+  echo "3. Run one-time OAuth bootstrap:"
   echo "   $oauth_bootstrap_command"
-  echo "3. Start using Gemini CLI with MCP server '$server_name'."
+  echo "4. Start using Gemini CLI with MCP server '$server_name'."
 }
 
 # Parse CLI arguments, resolve release tag, ensure host/docker prerequisites,

@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 from requests_oauthlib import OAuth1Session
 
-from evernote_mcp.evernote.auth_storage import persist_access_token
+from evernote_mcp.evernote.auth_storage import AuthStorageError, persist_access_token
 
 EVERNOTE_PRODUCTION_OAUTH_REQUEST_TOKEN_URL = "https://www.evernote.com/oauth"  # nosec B105
 EVERNOTE_PRODUCTION_OAUTH_AUTHORIZE_URL = "https://www.evernote.com/OAuth.action"
@@ -26,6 +26,7 @@ EVERNOTE_SANDBOX_OAUTH_AUTHORIZE_URL = "https://sandbox.evernote.com/OAuth.actio
 EVERNOTE_SANDBOX_OAUTH_ACCESS_TOKEN_URL = "https://sandbox.evernote.com/oauth"  # nosec B105
 
 DEFAULT_CALLBACK_HOST = "127.0.0.1"
+DEFAULT_CALLBACK_PORT = 0
 DEFAULT_CALLBACK_PATH = "/callback"
 DEFAULT_AUTH_TIMEOUT_SECONDS = 180
 
@@ -66,8 +67,14 @@ class OAuthCallbackHttpServer(HTTPServer):
     continue the OAuth flow as soon as the browser callback is received.
     """
 
-    def __init__(self, server_address: tuple[str, int], handler_class: type[BaseHTTPRequestHandler]):
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        handler_class: type[BaseHTTPRequestHandler],
+        callback_path: str,
+    ):
         super().__init__(server_address, handler_class)
+        self.callback_path = callback_path
         self.callback_event = threading.Event()
         self.callback_payload: OAuthCallbackPayload | None = None
 
@@ -90,7 +97,7 @@ class OAuthCallbackRequestHandler(BaseHTTPRequestHandler):
         """
 
         parsed_url = urlparse(self.path)
-        if parsed_url.path != DEFAULT_CALLBACK_PATH:
+        if parsed_url.path != self.server.callback_path:
             self._write_html_response(status_code=404, html_body="<h1>Not Found</h1>")
             return
 
@@ -137,17 +144,21 @@ class OAuthCallbackRequestHandler(BaseHTTPRequestHandler):
 class OAuthCallbackListener:
     """Context manager that owns the callback HTTP server lifecycle.
 
-    It binds a random free port on `127.0.0.1`, starts serving in a background
-    thread, and guarantees clean shutdown on exit.
+    It binds on a configurable host/port, starts serving in a background thread,
+    and guarantees clean shutdown on exit.
     """
 
     def __init__(
         self,
         callback_host: str = DEFAULT_CALLBACK_HOST,
+        callback_port: int = DEFAULT_CALLBACK_PORT,
         callback_path: str = DEFAULT_CALLBACK_PATH,
+        explicit_callback_url: str | None = None,
     ) -> None:
         self._callback_host = callback_host
+        self._callback_port = callback_port
         self._callback_path = callback_path
+        self._explicit_callback_url = explicit_callback_url
         self._http_server: OAuthCallbackHttpServer | None = None
         self._server_thread: threading.Thread | None = None
 
@@ -155,8 +166,9 @@ class OAuthCallbackListener:
         """Start the callback HTTP server and return the listener instance."""
 
         self._http_server = OAuthCallbackHttpServer(
-            server_address=(self._callback_host, 0),
+            server_address=(self._callback_host, self._callback_port),
             handler_class=OAuthCallbackRequestHandler,
+            callback_path=self._callback_path,
         )
         self._server_thread = threading.Thread(
             target=self._http_server.serve_forever,
@@ -179,6 +191,9 @@ class OAuthCallbackListener:
     @property
     def callback_url(self) -> str:
         """Return the callback URL passed to Evernote request-token step."""
+
+        if self._explicit_callback_url:
+            return self._explicit_callback_url
 
         if self._http_server is None:
             raise RuntimeError("OAuth callback listener is not started.")
@@ -244,9 +259,12 @@ def run_oauth_bootstrap(
     consumer_key: str,
     consumer_secret: str,
     sandbox: bool,
+    listen_host: str = DEFAULT_CALLBACK_HOST,
+    listen_port: int = DEFAULT_CALLBACK_PORT,
+    callback_url: str | None = None,
     timeout_seconds: int = DEFAULT_AUTH_TIMEOUT_SECONDS,
     oauth_session_factory: Callable[..., OAuth1Session] = OAuth1Session,
-    callback_listener_factory: Callable[[], OAuthCallbackListener] = OAuthCallbackListener,
+    callback_listener_factory: Callable[[], OAuthCallbackListener] | None = None,
     authorization_url_opener: Callable[[str], bool] | None = None,
     token_persister: Callable[[str, bool], Path] = persist_access_token,
 ) -> OAuthBootstrapResult:
@@ -256,6 +274,9 @@ def run_oauth_bootstrap(
         consumer_key: Evernote OAuth consumer key issued by Evernote support.
         consumer_secret: Evernote OAuth consumer secret issued by Evernote support.
         sandbox: Whether to use sandbox OAuth endpoints.
+        listen_host: Host/IP for temporary local callback listener bind.
+        listen_port: Port for temporary callback listener bind (`0` means random free port).
+        callback_url: Optional explicit callback URL sent to Evernote.
         timeout_seconds: Max wait for local callback verifier.
         oauth_session_factory: Injectable OAuth session constructor for tests.
         callback_listener_factory: Injectable callback listener constructor for tests.
@@ -275,8 +296,16 @@ def run_oauth_bootstrap(
 
     resolved_authorization_url_opener = authorization_url_opener or open_authorization_url
     oauth_endpoints = resolve_oauth_endpoints(sandbox=sandbox)
+    resolved_callback_listener_factory = callback_listener_factory or (
+        lambda: OAuthCallbackListener(
+            callback_host=listen_host,
+            callback_port=listen_port,
+            callback_path=DEFAULT_CALLBACK_PATH,
+            explicit_callback_url=callback_url,
+        )
+    )
 
-    with callback_listener_factory() as callback_listener:
+    with resolved_callback_listener_factory() as callback_listener:
         oauth_request_session = oauth_session_factory(
             client_key=consumer_key,
             client_secret=consumer_secret,
@@ -330,7 +359,15 @@ def run_oauth_bootstrap(
         "access token",
     )
 
-    token_file_path = token_persister(access_token, sandbox)
+    try:
+        token_file_path = token_persister(access_token, sandbox)
+    except AuthStorageError as auth_storage_error:
+        raise OAuthFlowError(
+            "OAuth succeeded but the token file could not be written. "
+            "If using Docker with a named volume, initialize volume ownership once "
+            "as root before running auth; alternatively use a writable host bind mount."
+        ) from auth_storage_error
+
     return OAuthBootstrapResult(token_file_path=token_file_path, sandbox=sandbox)
 
 
