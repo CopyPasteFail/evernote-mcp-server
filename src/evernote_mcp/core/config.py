@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import os
+import warnings
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Mapping
 
-EVERNOTE_TOKEN_ENV_NAME = "EVERNOTE_TOKEN"  # nosec B105
+from evernote_mcp.evernote.auth_storage import AuthStorageError, SavedAccessToken, load_saved_access_token
+
+EVERNOTE_CONSUMER_KEY_ENV_NAME = "EVERNOTE_CONSUMER_KEY"
+EVERNOTE_CONSUMER_SECRET_ENV_NAME = "EVERNOTE_CONSUMER_SECRET"  # nosec B105
 EVERNOTE_SANDBOX_ENV_NAME = "EVERNOTE_SANDBOX"
 READ_ONLY_ENV_NAME = "READ_ONLY"
 LOG_LEVEL_ENV_NAME = "LOG_LEVEL"
@@ -38,6 +43,21 @@ class AppConfig:
     evernote_sandbox: bool
     read_only: bool
     log_level: str
+
+
+@dataclass(frozen=True)
+class OAuthBootstrapConfig:
+    """Configuration required to run the OAuth bootstrap command.
+
+    Attributes:
+        consumer_key: Evernote OAuth consumer key.
+        consumer_secret: Evernote OAuth consumer secret.
+        sandbox: Whether to run OAuth against Evernote sandbox.
+    """
+
+    consumer_key: str
+    consumer_secret: str
+    sandbox: bool
 
 
 def parse_boolean_environment_value(raw_value: str, variable_name: str) -> bool:
@@ -102,12 +122,6 @@ def load_config_from_environment(environment: Mapping[str, str] | None = None) -
 
     source_environment = os.environ if environment is None else environment
 
-    evernote_token = source_environment.get(EVERNOTE_TOKEN_ENV_NAME, "").strip()
-    if not evernote_token:
-        raise ConfigurationError(
-            f"Missing required environment variable: {EVERNOTE_TOKEN_ENV_NAME}."
-        )
-
     raw_evernote_sandbox = source_environment.get(
         EVERNOTE_SANDBOX_ENV_NAME,
         EVERNOTE_SANDBOX_DEFAULT_VALUE,
@@ -115,6 +129,9 @@ def load_config_from_environment(environment: Mapping[str, str] | None = None) -
     evernote_sandbox = parse_boolean_environment_value(
         raw_evernote_sandbox,
         EVERNOTE_SANDBOX_ENV_NAME,
+    )
+    evernote_token = resolve_evernote_authentication_token(
+        evernote_sandbox=evernote_sandbox,
     )
     read_only_mode = resolve_read_only_mode(source_environment)
     raw_log_level = source_environment.get(LOG_LEVEL_ENV_NAME, DEFAULT_LOG_LEVEL)
@@ -126,3 +143,97 @@ def load_config_from_environment(environment: Mapping[str, str] | None = None) -
         read_only=read_only_mode,
         log_level=normalized_log_level,
     )
+
+
+def load_oauth_bootstrap_config_from_environment(
+    environment: Mapping[str, str] | None = None,
+) -> OAuthBootstrapConfig:
+    """Load and validate OAuth bootstrap inputs from environment variables.
+
+    Args:
+        environment: Optional environment mapping. Defaults to process environment.
+
+    Returns:
+        Parsed and validated OAuth bootstrap config.
+
+    Raises:
+        ConfigurationError: If consumer credentials are missing or sandbox value is invalid.
+    """
+
+    source_environment = os.environ if environment is None else environment
+
+    consumer_key = source_environment.get(EVERNOTE_CONSUMER_KEY_ENV_NAME, "").strip()
+    if not consumer_key:
+        raise ConfigurationError(
+            f"Missing required environment variable: {EVERNOTE_CONSUMER_KEY_ENV_NAME}."
+        )
+
+    consumer_secret = source_environment.get(EVERNOTE_CONSUMER_SECRET_ENV_NAME, "").strip()
+    if not consumer_secret:
+        raise ConfigurationError(
+            f"Missing required environment variable: {EVERNOTE_CONSUMER_SECRET_ENV_NAME}."
+        )
+
+    raw_evernote_sandbox = source_environment.get(
+        EVERNOTE_SANDBOX_ENV_NAME,
+        EVERNOTE_SANDBOX_DEFAULT_VALUE,
+    )
+    evernote_sandbox = parse_boolean_environment_value(
+        raw_evernote_sandbox,
+        EVERNOTE_SANDBOX_ENV_NAME,
+    )
+
+    return OAuthBootstrapConfig(
+        consumer_key=consumer_key,
+        consumer_secret=consumer_secret,
+        sandbox=evernote_sandbox,
+    )
+
+
+def resolve_evernote_authentication_token(
+    evernote_sandbox: bool,
+    token_loader: Callable[[], SavedAccessToken | None] | None = None,
+) -> str:
+    """Resolve Evernote authentication token from persisted storage.
+
+    Args:
+        evernote_sandbox: Sandbox mode resolved for this runtime.
+        token_loader: Optional injectable token-loader dependency for deterministic tests.
+
+    Returns:
+        Evernote authentication token string.
+
+    Raises:
+        ConfigurationError: If no token is available or storage read fails.
+
+    Resolution:
+        Persisted token from OAuth bootstrap storage.
+    """
+
+    resolved_token_loader = token_loader or load_saved_access_token
+
+    try:
+        saved_access_token = resolved_token_loader()
+    except AuthStorageError as auth_storage_error:
+        raise ConfigurationError(
+            "Failed to read saved Evernote token. "
+            "Run `python -m evernote_mcp auth` with EVERNOTE_CONSUMER_KEY and "
+            "EVERNOTE_CONSUMER_SECRET set."
+        ) from auth_storage_error
+
+    if saved_access_token is None:
+        raise ConfigurationError(
+            "Missing Evernote authentication token. "
+            "Run `python -m evernote_mcp auth` with EVERNOTE_CONSUMER_KEY and "
+            "EVERNOTE_CONSUMER_SECRET set."
+        )
+
+    if saved_access_token.sandbox != evernote_sandbox:
+        warnings.warn(
+            "Saved Evernote token sandbox setting does not match EVERNOTE_SANDBOX. "
+            f"saved_sandbox={saved_access_token.sandbox}, "
+            f"runtime_sandbox={evernote_sandbox}.",
+            stacklevel=2,
+        )
+
+    return saved_access_token.access_token

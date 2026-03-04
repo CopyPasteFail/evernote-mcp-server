@@ -32,7 +32,10 @@ The server is designed for:
 - Release flow for GHCR image publishing on `v*` tags
 
 ## 3. Security model
-- `EVERNOTE_TOKEN` is required at startup.
+- Server startup reads only the saved OAuth token at `~/.config/evernote-mcp-server/token.json`.
+- First-time OAuth bootstrap requires:
+  - `EVERNOTE_CONSUMER_KEY`
+  - `EVERNOTE_CONSUMER_SECRET`
 - Optional: `EVERNOTE_SANDBOX=true` switches Evernote API calls to sandbox endpoints (default `false`). Sandbox availability may be limited or deprecated; most users should leave this as default false.
 
 - `READ_ONLY` defaults to `true`.
@@ -44,7 +47,7 @@ The server is designed for:
 ## 4. Quickstart for users
 ### Prerequisites
 - Python 3.13
-- Evernote token (`EVERNOTE_TOKEN`)
+- Evernote OAuth app credentials (`EVERNOTE_CONSUMER_KEY`, `EVERNOTE_CONSUMER_SECRET`) for first-time bootstrap
 - For Windows users: run these commands inside WSL (confirmed with Ubuntu)
 
 ### Local Python usage (stdio)
@@ -54,11 +57,29 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# Edit .env and set EVERNOTE_TOKEN (READ_ONLY defaults to true)
+# Edit .env and set EVERNOTE_CONSUMER_KEY / EVERNOTE_CONSUMER_SECRET
+PYTHONPATH=src python -m evernote_mcp auth
 PYTHONPATH=src python -m evernote_mcp
 ```
 
 `.env` is auto-loaded at startup when present, and existing environment variables still take precedence. Run commands from the repo root so `.env` is discovered.
+
+### First-time auth
+Run OAuth bootstrap once to acquire and persist the Evernote access token:
+```bash
+PYTHONPATH=src python -m evernote_mcp auth
+```
+
+Behavior:
+- Starts a local callback server on `127.0.0.1` with a random free port.
+- Attempts to open the Evernote authorize URL automatically.
+- In WSL or headless environments, browser opening can fail; the command prints the URL for manual copy/paste.
+- Saves token to `~/.config/evernote-mcp-server/token.json` with restricted permissions.
+
+Reset saved auth by deleting:
+```bash
+rm -f ~/.config/evernote-mcp-server/token.json
+```
 
 Explicit stdio selection:
 ```bash
@@ -75,7 +96,7 @@ This exits with a clear not-yet-implemented message.
 Gemini CLI is the primary supported local MCP client in v0.1. Exact MCP client configuration shape can vary by Gemini CLI version, but the important values are:
 - command: `python`
 - args: `-m evernote_mcp --transport stdio`
-- environment: `EVERNOTE_TOKEN`, optional `READ_ONLY` (defaults to true)
+- environment: OAuth consumer credentials for first-time bootstrap, optional `READ_ONLY` (defaults to true)
 
 ### Docker usage
 ```bash
@@ -84,12 +105,31 @@ docker build -t evernote-mcp-server:local .
 # Recommended: pass vars with an env file
 docker run --rm -i --env-file .env \
   evernote-mcp-server:local
-
-# Alternative: mount .env to /app/.env for automatic dotenv loading
-docker run --rm -i \
-  -v "$(pwd)/.env:/app/.env:ro" \
-  evernote-mcp-server:local
 ```
+Without a persisted volume, you'll need to re-run `python -m evernote_mcp auth` for each new container.
+
+#### Persist OAuth token with a Docker named volume
+
+1. Create a named volume for persisted auth state
+    ```bash
+    docker volume create evernote-mcp-auth
+    ```
+
+2. Run one-time OAuth bootstrap with the named volume mounted
+    ```bash
+    docker run --rm -it --env-file .env \
+      -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server \
+      evernote-mcp-server:local \
+      python -m evernote_mcp auth
+    ```
+
+3. Run the server with the same named volume mounted
+    ```bash
+    docker run --rm -i --env-file .env \
+      -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server \
+      evernote-mcp-server:local
+    ```
+If you set `XDG_CONFIG_HOME`, token storage moves under that directory instead.
 
 GHCR image example:
 ```bash
@@ -106,8 +146,8 @@ python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
-# Edit .env and set EVERNOTE_TOKEN
 ```
+Edit `.env` and set `EVERNOTE_CONSUMER_KEY` and `EVERNOTE_CONSUMER_SECRET`, and then run auth once
 
 ### Enable repository pre-push hook
 ```bash
@@ -140,7 +180,7 @@ If automation fails, use the script’s printed UI fallback guidance:
 ## 6. Regular maintainer development flow
 ```bash
 source .venv/bin/activate
-# Ensure .env exists (copy from .env.example) and includes EVERNOTE_TOKEN.
+# Ensure .env exists (copy from .env.example) and includes auth settings.
 # Run commands from the repository root so .env is discovered.
 
 make check
@@ -190,8 +230,8 @@ Contributors should:
 Contributors should not run `scripts/release.sh` and should not create release tags (`v*`). Release tags are maintainer-controlled.
 
 ## 9. Troubleshooting
-- `Configuration error: Missing required environment variable: EVERNOTE_TOKEN.`
-  - set `EVERNOTE_TOKEN` before starting the server
+- `Configuration error: Missing Evernote authentication token.`
+  - run `PYTHONPATH=src python -m evernote_mcp auth` with consumer key/secret set
 - `Write operations are disabled. Set READ_ONLY=false to enable write operations.`
   - expected while `READ_ONLY=true`
 - `SSE transport is planned but not implemented yet in v0.1. Use --transport stdio.`

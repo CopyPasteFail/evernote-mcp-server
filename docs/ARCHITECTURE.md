@@ -11,7 +11,7 @@
 The server process loads config from environment, builds a shared Evernote gateway, registers MCP tools, and runs a selected transport.
 
 Main flow:
-1. parse env config (`EVERNOTE_TOKEN`, `READ_ONLY`, optional logging)
+1. parse env config (OAuth token file, `READ_ONLY`, optional logging)
 2. set policy mode (`read-only` by default)
 3. register read and write MCP tools
 4. run transport (`stdio` implemented)
@@ -33,7 +33,11 @@ The architecture is intentionally transport-agnostic: tool modules and Evernote 
 `transport/sse.py` exists intentionally as a placeholder. CLI accepts `--transport sse` but returns a clear not-implemented error. SSE is deliberately deferred in v0.1, and adding it later should not require changes to Evernote logic or tool modules.
 
 ## 5. Security model
-- Required secret: `EVERNOTE_TOKEN`.
+- Runtime auth token source:
+  - Saved OAuth token file at `$XDG_CONFIG_HOME/evernote-mcp-server/token.json` when `XDG_CONFIG_HOME` is set; otherwise `~/.config/evernote-mcp-server/token.json`
+- OAuth bootstrap credentials for first-time auth:
+  - `EVERNOTE_CONSUMER_KEY`
+  - `EVERNOTE_CONSUMER_SECRET`
 - Write gate: `READ_ONLY` (default `true`).
 - Every write tool calls centralized policy enforcement before mutation.
 - Blocked writes raise a clear message:
@@ -48,9 +52,16 @@ This server now calls those services directly over HTTPS using a small Thrift cl
 
 Why this design:
 - The legacy Python SDK client wrapper depends on an old oauth2 chain that is unreliable on modern Python (including Python 3.13).
-- We only need developer-token authentication for this server, not OAuth flows.
+- OAuth bootstrapping is implemented once in a dedicated CLI command (`python -m evernote_mcp auth`) and token persistence layer.
+- Runtime API calls continue to use a single EDAM authentication token, independent of how that token was obtained.
 - A thin Thrift client keeps dependencies smaller and behavior explicit.
 - Optional sandbox (deprecated) routing is supported through `EVERNOTE_SANDBOX=true` for development/testing accounts.
+
+Token storage is intentionally separated from `.env`:
+- `.env` is convenient for configuration and bootstrap credentials.
+- OAuth access tokens are persisted in the config directory (`$XDG_CONFIG_HOME/evernote-mcp-server` or default `~/.config/evernote-mcp-server`) with restricted file permissions.
+- Container deployments should persist that config directory; a Docker named volume is the recommended default.
+- This allows one-time interactive auth and non-interactive runtime startup without repeatedly copying secrets into `.env`.
 
 In simple terms:
 - Thrift is a schema + RPC system.

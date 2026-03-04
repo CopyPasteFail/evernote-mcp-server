@@ -7,9 +7,15 @@ import sys
 
 from dotenv import load_dotenv
 
-from evernote_mcp.core.config import ConfigurationError, load_config_from_environment
+from evernote_mcp.core.config import (
+    ConfigurationError,
+    load_config_from_environment,
+    load_oauth_bootstrap_config_from_environment,
+)
+from evernote_mcp.evernote.oauth import OAuthFlowError, run_oauth_bootstrap
 
 SUPPORTED_TRANSPORT_CHOICES = ("stdio", "sse")
+SUPPORTED_COMMAND_CHOICES = ("serve", "auth")
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -20,6 +26,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
     """
 
     argument_parser = argparse.ArgumentParser(description="Evernote MCP server")
+    argument_parser.add_argument(
+        "command",
+        nargs="?",
+        default="serve",
+        choices=SUPPORTED_COMMAND_CHOICES,
+        help="Command to run: serve (default) or auth.",
+    )
     argument_parser.add_argument(
         "--transport",
         default="stdio",
@@ -52,6 +65,26 @@ def run_server_with_transport(transport_name: str) -> None:
     app_config = load_config_from_environment()
     mcp_server = build_mcp_server(app_config=app_config)
     run_stdio_transport(mcp_server)
+
+
+def run_auth_command() -> None:
+    """Run one-time OAuth bootstrap and persist the resulting access token.
+
+    Raises:
+        ConfigurationError: When required OAuth environment values are missing.
+        OAuthFlowError: When OAuth handshake cannot be completed.
+    """
+
+    oauth_bootstrap_config = load_oauth_bootstrap_config_from_environment()
+    oauth_bootstrap_result = run_oauth_bootstrap(
+        consumer_key=oauth_bootstrap_config.consumer_key,
+        consumer_secret=oauth_bootstrap_config.consumer_secret,
+        sandbox=oauth_bootstrap_config.sandbox,
+    )
+    print(
+        "Evernote OAuth bootstrap succeeded. "
+        f"Token saved to {oauth_bootstrap_result.token_file_path}."
+    )
 
 
 def format_safe_fatal_error_message(unhandled_error: Exception) -> str:
@@ -102,10 +135,16 @@ def main() -> int:
     parsed_arguments = argument_parser.parse_args()
 
     try:
-        run_server_with_transport(parsed_arguments.transport)
+        if parsed_arguments.command == "auth":
+            run_auth_command()
+        else:
+            run_server_with_transport(parsed_arguments.transport)
     except ConfigurationError as configuration_error:
         print(f"Configuration error: {configuration_error}", file=sys.stderr)
         return 2
+    except OAuthFlowError as oauth_flow_error:
+        print(f"OAuth error: {oauth_flow_error}", file=sys.stderr)
+        return 4
     except NotImplementedError as not_implemented_error:
         print(not_implemented_error, file=sys.stderr)
         return 3
