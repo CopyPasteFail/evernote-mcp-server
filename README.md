@@ -144,8 +144,8 @@ docker run --rm -i --env-file .env \
 
 ## 7. Gemini CLI
 Gemini CLI is the primary supported local MCP client in v0.1. Exact config shape can vary by Gemini CLI version, but the important values are:
-- `command`: the Python executable used to launch the MCP server
-- `args`: starts `evernote_mcp` over stdio with `-m evernote_mcp --transport stdio`
+- `command`: how Gemini CLI starts the MCP server process (local Python or Docker)
+- `args`: starts `evernote_mcp` over stdio with `--transport stdio`
 - `environment`: the server reads these values from its process environment, which can come from exported variables or the auto-loaded `.env` when launched from the repo root
   - `EVERNOTE_CONSUMER_KEY`: Evernote API consumer key
   - `EVERNOTE_CONSUMER_SECRET`: Evernote API consumer secret
@@ -154,6 +154,9 @@ Gemini CLI is the primary supported local MCP client in v0.1. Exact config shape
 
 Gemini CLI settings can be user-wide in `~/.gemini/settings.json` or project-specific in `.gemini/settings.json` at the repo root.
 
+Choose the config that matches your environment setup.
+
+### 7.1 Local Python environment (venv)
 Recommended project-specific config for WSL/Linux:
 ```json
 {
@@ -173,12 +176,42 @@ Recommended project-specific config for WSL/Linux:
 
 `cwd` should point at the repo root because the server auto-loads `.env` from the current working directory.
 
-Before using Gemini CLI with this MCP server, run:
+Before using Gemini CLI with this setup, run:
 ```bash
 PYTHONPATH=src python -m evernote_mcp auth
 ```
 
 Replace `/absolute/path/to/evernote-mcp-server` with your actual absolute repo path.
+
+### 7.2 Docker/container environment
+Use this if you want Gemini CLI to start the server from a container image instead of your local `.venv`.
+
+Recommended project-specific config:
+```json
+{
+  "mcpServers": {
+    "evernote-mcp-server": {
+      "command": "bash",
+      "args": [
+        "-lc",
+        "docker run --rm -i --env-file .env -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server evernote-mcp-server:local"
+      ],
+      "cwd": "/absolute/path/to/evernote-mcp-server",
+      "trust": true
+    }
+  }
+}
+```
+
+Before using Gemini CLI with this setup, run OAuth bootstrap in the same persisted Docker volume:
+```bash
+docker volume create evernote-mcp-auth
+
+docker run --rm -it --env-file .env \
+  -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server \
+  evernote-mcp-server:local \
+  python -m evernote_mcp auth
+```
 
 ## 8. Maintainer setup
 ### 8.1 Clone and install dev dependencies
