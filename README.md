@@ -17,14 +17,12 @@ The server is designed for:
   - `search_notes`
   - `get_note`
   - `get_note_metadata`
-- Write tools (implemented and registered):
+- Write tools (implemented and registered, gated by `READ_ONLY`):
   - `append_to_note_plaintext`
   - `set_note_title`
   - `add_tags_by_name`
   - `move_note`
   - `create_note`
-- Write gating with one env var:
-  - `READ_ONLY=true` by default
 - Pluggable transport architecture:
   - `stdio` implemented
   - `sse` planned and intentionally not implemented in v0.1
@@ -32,12 +30,16 @@ The server is designed for:
 - Release flow for GHCR image publishing on `v*` tags
 
 ## 3. Security model
-- Server startup reads only the saved OAuth token at `~/.config/evernote-mcp-server/token.json`.
+### Authentication
+- Runtime auth uses a saved OAuth token at:
+  - `~/.config/evernote-mcp-server/token.json` (default)
+  - or `$XDG_CONFIG_HOME/evernote-mcp-server/token.json` if `XDG_CONFIG_HOME` is set
 - First-time OAuth bootstrap requires:
   - `EVERNOTE_CONSUMER_KEY`
   - `EVERNOTE_CONSUMER_SECRET`
-- Optional: `EVERNOTE_SANDBOX=true` switches Evernote API calls to sandbox endpoints (default `false`). Sandbox availability may be limited or deprecated; most users should leave this as default false.
+- Optional: `EVERNOTE_SANDBOX=true` routes OAuth and API calls to sandbox endpoints (default `false`). Sandbox availability may be limited; most users should leave it as `false`.
 
+### Write safety
 - `READ_ONLY` defaults to `true`.
 - Every write tool calls shared policy enforcement first.
 - When writes are blocked, tools fail with:
@@ -47,98 +49,95 @@ The server is designed for:
 ## 4. Quickstart for users
 ### Prerequisites
 - Python 3.13
-- Evernote OAuth app credentials (`EVERNOTE_CONSUMER_KEY`, `EVERNOTE_CONSUMER_SECRET`) for first-time bootstrap
-- For Windows users: run these commands inside WSL (confirmed with Ubuntu)
+- Evernote OAuth app credentials (`EVERNOTE_CONSUMER_KEY`, `EVERNOTE_CONSUMER_SECRET`)
+- For Windows users: run inside WSL (confirmed with Ubuntu)
 
-### Local Python usage (stdio)
+### Step 1: Create `.env`
+```bash
+cp .env.example .env
+# Edit .env and set EVERNOTE_CONSUMER_KEY / EVERNOTE_CONSUMER_SECRET
+```
+
+`.env` is auto-loaded at startup when present. Run commands from the repo root so `.env` is discovered.
+
+### Step 2: Install and run OAuth bootstrap (one-time)
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env
-# Edit .env and set EVERNOTE_CONSUMER_KEY / EVERNOTE_CONSUMER_SECRET
-PYTHONPATH=src python -m evernote_mcp auth
-PYTHONPATH=src python -m evernote_mcp
-```
-
-`.env` is auto-loaded at startup when present, and existing environment variables still take precedence. Run commands from the repo root so `.env` is discovered.
-
-### First-time auth
-Run OAuth bootstrap once to acquire and persist the Evernote access token:
-```bash
 PYTHONPATH=src python -m evernote_mcp auth
 ```
 
 Behavior:
 - Starts a local callback server on `127.0.0.1` with a random free port.
 - Attempts to open the Evernote authorize URL automatically.
-- In WSL or headless environments, browser opening can fail; the command prints the URL for manual copy/paste.
-- Saves token to `~/.config/evernote-mcp-server/token.json` with restricted permissions.
+- In WSL/headless environments, browser opening can fail; the command prints the URL for manual copy/paste.
+- Saves token to `~/.config/evernote-mcp-server/token.json` (or under `$XDG_CONFIG_HOME` when set) with restricted permissions.
 
 Reset saved auth by deleting:
 ```bash
 rm -f ~/.config/evernote-mcp-server/token.json
 ```
 
-Explicit stdio selection:
+### Step 3: Run the MCP server (stdio)
 ```bash
-python -m evernote_mcp --transport stdio
+PYTHONPATH=src python -m evernote_mcp --transport stdio
 ```
 
 SSE in v0.1 (planned, not implemented):
 ```bash
-python -m evernote_mcp --transport sse
+PYTHONPATH=src python -m evernote_mcp --transport sse
 ```
 This exits with a clear not-yet-implemented message.
 
 ### Gemini CLI over stdio
-Gemini CLI is the primary supported local MCP client in v0.1. Exact MCP client configuration shape can vary by Gemini CLI version, but the important values are:
+Gemini CLI is the primary supported local MCP client in v0.1. Exact config shape can vary by Gemini CLI version, but the important values are:
 - command: `python`
 - args: `-m evernote_mcp --transport stdio`
-- environment: OAuth consumer credentials for first-time bootstrap, optional `READ_ONLY` (defaults to true)
+- environment:
+  - `EVERNOTE_CONSUMER_KEY`
+  - `EVERNOTE_CONSUMER_SECRET`
+  - optional `READ_ONLY` (defaults to `true`)
+  - optional `EVERNOTE_SANDBOX` (defaults to `false`)
 
-### Docker usage
+## 5. Docker usage
+### Build and run (no persistence)
 ```bash
 docker build -t evernote-mcp-server:local .
-
-# Recommended: pass vars with an env file
 docker run --rm -i --env-file .env \
   evernote-mcp-server:local
 ```
-Without a persisted volume, you'll need to re-run `python -m evernote_mcp auth` for each new container.
 
-#### Persist OAuth token with a Docker named volume
+Without persistence, you’ll need to run `python -m evernote_mcp auth` again for each new container.
 
-1. Create a named volume for persisted auth state
-    ```bash
-    docker volume create evernote-mcp-auth
-    ```
+### Persist OAuth token with a Docker named volume (recommended)
+```bash
+# Create a named volume for persisted auth state
+docker volume create evernote-mcp-auth
 
-2. Run one-time OAuth bootstrap with the named volume mounted
-    ```bash
-    docker run --rm -it --env-file .env \
-      -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server \
-      evernote-mcp-server:local \
-      python -m evernote_mcp auth
-    ```
+# One-time OAuth bootstrap (writes token into the volume)
+docker run --rm -it --env-file .env \
+  -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server \
+  evernote-mcp-server:local \
+  python -m evernote_mcp auth
 
-3. Run the server with the same named volume mounted
-    ```bash
-    docker run --rm -i --env-file .env \
-      -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server \
-      evernote-mcp-server:local
-    ```
+# Run the server with the same named volume mounted
+docker run --rm -i --env-file .env \
+  -v evernote-mcp-auth:/home/appuser/.config/evernote-mcp-server \
+  evernote-mcp-server:local
+```
+
 If you set `XDG_CONFIG_HOME`, token storage moves under that directory instead.
 
-GHCR image example:
+### GHCR image example
 ```bash
 docker run --rm -i --env-file .env \
   ghcr.io/<owner>/evernote-mcp-server:v0.1.0
 ```
 
-## 5. One-time maintainer setup
-### Clone and install tools
+## 6. One-time maintainer setup
+### Clone and install dev dependencies
 ```bash
 git clone <repo-url>
 cd evernote-mcp-server
@@ -147,7 +146,12 @@ source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
 ```
-Edit `.env` and set `EVERNOTE_CONSUMER_KEY` and `EVERNOTE_CONSUMER_SECRET`, and then run auth once
+Edit `.env` and set `EVERNOTE_CONSUMER_KEY` and `EVERNOTE_CONSUMER_SECRET`
+
+### Run OAuth bootstrap once
+```bash
+PYTHONPATH=src python -m evernote_mcp auth
+```
 
 ### Enable repository pre-push hook
 ```bash
@@ -177,11 +181,10 @@ If automation fails, use the script’s printed UI fallback guidance:
 - if GitHub UI requires a fully-qualified pattern, use `refs/tags/v*`
 - restrict release-tag creation to maintainers/admins
 
-## 6. Regular maintainer development flow
+## 7. Regular maintainer development flow
+### Daily loop
 ```bash
 source .venv/bin/activate
-# Ensure .env exists (copy from .env.example) and includes auth settings.
-# Run commands from the repository root so .env is discovered.
 
 make check
 PYTHONPATH=src python -m evernote_mcp --transport stdio
@@ -193,7 +196,7 @@ Useful commands:
 - `make test`
 - `make check`
 
-## 7. Release flow
+## 8. Release flow
 Releases are tag-driven and intentionally explicit.
 
 ```bash
@@ -221,7 +224,7 @@ The GitHub `release.yml` workflow then:
 4. builds and publishes GHCR image tags (`vX.Y.Z`, `latest`)
 5. creates a GitHub Release
 
-## 8. Contributor workflow
+## 9. Contributor workflow
 Contributors should:
 1. create feature branches
 2. open pull requests targeting `main`
@@ -229,7 +232,7 @@ Contributors should:
 
 Contributors should not run `scripts/release.sh` and should not create release tags (`v*`). Release tags are maintainer-controlled.
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 - `Configuration error: Missing Evernote authentication token.`
   - run `PYTHONPATH=src python -m evernote_mcp auth` with consumer key/secret set
 - `Write operations are disabled. Set READ_ONLY=false to enable write operations.`
@@ -239,5 +242,5 @@ Contributors should not run `scripts/release.sh` and should not create release t
 - `make security` fails on dependency vulnerabilities
   - review findings and upgrade dependencies before release
 
-## 10. Architecture
+## 11. Architecture
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the transport abstraction, security model, repository layout rationale, and release design.
