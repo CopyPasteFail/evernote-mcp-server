@@ -215,9 +215,7 @@ Releases are tag-driven and intentionally explicit.
 
 ```bash
 source .venv/bin/activate
-./scripts/release.sh patch
-# or: ./scripts/release.sh minor
-# or: ./scripts/release.sh major
+./scripts/release.sh patch # <patch|minor|major>
 ```
 
 `./scripts/release.sh` does all of the following:
