@@ -53,12 +53,10 @@ pip install -r requirements.txt
 
 cp .env.example .env
 # Edit .env and set EVERNOTE_TOKEN (READ_ONLY defaults to true)
-export PYTHONPATH=src
-
-python -m evernote_mcp
+PYTHONPATH=src python -m evernote_mcp
 ```
 
-`.env` is auto-loaded at startup when present. Existing environment variables are preserved (for example shell exports, Docker `-e`, or CI variables). It is loaded from the current working directory, so run commands from the repo root (or mount `.env` to `/app/.env` in Docker as shown below).
+`.env` is auto-loaded at startup when present, and existing environment variables still take precedence. Run commands from the repo root so `.env` is discovered.
 
 Explicit stdio selection:
 ```bash
@@ -81,11 +79,11 @@ Gemini CLI is the primary supported local MCP client in v0.1. Exact MCP client c
 ```bash
 docker build -t evernote-mcp-server:local .
 
-# Option 1: pass vars with an env file
+# Recommended: pass vars with an env file
 docker run --rm -i --env-file .env \
   evernote-mcp-server:local
 
-# Option 2: mount .env to /app/.env for automatic dotenv loading
+# Alternative: mount .env to /app/.env for automatic dotenv loading
 docker run --rm -i \
   -v "$(pwd)/.env:/app/.env:ro" \
   evernote-mcp-server:local
@@ -104,7 +102,7 @@ git clone <repo-url>
 cd evernote-mcp-server
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+pip install -r requirements-dev.txt
 cp .env.example .env
 # Edit .env and set EVERNOTE_TOKEN
 ```
@@ -133,18 +131,18 @@ chmod +x scripts/setup-tag-protection.sh
 
 If automation fails, use the script’s printed UI fallback guidance:
 - Settings -> Rules -> Rulesets
-- create a tag ruleset for `v*`
+- create a tag ruleset; the tag pattern is typically `v*`
+- if GitHub UI requires a fully-qualified pattern, use `refs/tags/v*`
 - restrict release-tag creation to maintainers/admins
 
 ## 6. Regular maintainer development flow
 ```bash
 source .venv/bin/activate
-export EVERNOTE_TOKEN="your-token"
-export READ_ONLY=true
-export PYTHONPATH=src
+# Ensure .env exists (copy from .env.example) and includes EVERNOTE_TOKEN.
+# Run commands from the repository root so .env is discovered.
 
 make check
-python -m evernote_mcp --transport stdio
+PYTHONPATH=src python -m evernote_mcp --transport stdio
 ```
 
 Useful commands:
