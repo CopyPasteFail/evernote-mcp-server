@@ -1,5 +1,4 @@
-# evernote-mcp-server
-
+# Evernote MCP Server
 `evernote-mcp-server` is a Python MCP server that exposes Evernote notebook and note operations over MCP `stdio`.
 
 It is primarily documented for people who want to use it from Gemini CLI with the published Docker image. Contributor and maintainer workflows appear later in this README so the first-run path stays simple.
@@ -282,6 +281,19 @@ make security
 make test
 make check
 ```
+
+Run the container vulnerability scan separately when you need to validate the
+Docker image locally without making it part of the default contributor loop.
+
+```bash
+make container-security
+```
+
+This target builds `evernote-mcp-server:local` and runs a Trivy image scan that
+fails on `HIGH` or `CRITICAL` findings.
+This optional check requires local Docker and `trivy` to be installed.
+Local Trivy runs are intentionally stricter than GitHub Actions and may fail on
+unfixed base-image vulnerabilities that CI ignores.
 
 ### Optional Pre-Push Hook
 
