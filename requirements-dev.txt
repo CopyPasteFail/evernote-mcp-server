@@ -1,5 +1,6 @@
--r requirements.txt
-pytest==9.0.2
+﻿-r requirements.txt
+pytest==9.0.3
 ruff==0.15.4
 bandit==1.9.4
 pip-audit==2.10.0
+fastmcp==3.2.4
