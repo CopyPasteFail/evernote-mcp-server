@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path, PureWindowsPath
 
+import pytest
+
+from scripts import install_gemini_mcp
 from scripts.install_gemini_mcp import (
     build_docker_server_config,
     build_python_server_config,
@@ -98,3 +102,107 @@ def test_docker_mode_config_remains_unchanged() -> None:
         "cwd": str(repository_path),
         "trust": True,
     }
+
+
+def test_missing_gemini_cli_fails_when_writing_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr(install_gemini_mcp.shutil, "which", lambda _: None)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "install_gemini_mcp.py",
+            "--mode",
+            "python",
+            "--settings-path",
+            str(settings_path),
+        ],
+    )
+
+    exit_code = install_gemini_mcp.main()
+
+    assert exit_code == 5
+    assert not settings_path.exists()
+    assert (
+        "Gemini CLI was not found on PATH. Install Gemini CLI and authenticate "
+        "it with your Google account before installing this MCP entry."
+    ) in capsys.readouterr().err
+
+
+def test_skip_gemini_check_bypasses_missing_cli(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr(install_gemini_mcp.shutil, "which", lambda _: None)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "install_gemini_mcp.py",
+            "--mode",
+            "python",
+            "--settings-path",
+            str(settings_path),
+            "--skip-gemini-check",
+        ],
+    )
+
+    exit_code = install_gemini_mcp.main()
+
+    assert exit_code == 0
+    settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert "evernote-mcp-server" in settings_data["mcpServers"]
+
+
+def test_print_config_does_not_require_gemini_cli(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr(install_gemini_mcp.shutil, "which", lambda _: None)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "install_gemini_mcp.py",
+            "--mode",
+            "python",
+            "--settings-path",
+            str(settings_path),
+            "--print-config",
+        ],
+    )
+
+    exit_code = install_gemini_mcp.main()
+
+    assert exit_code == 0
+    assert not settings_path.exists()
+    printed_config = json.loads(capsys.readouterr().out)
+    assert printed_config["args"] == ["-m", "evernote_mcp", "--transport", "stdio"]
+
+
+def test_detected_gemini_cli_allows_settings_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr(install_gemini_mcp.shutil, "which", lambda _: "gemini")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "install_gemini_mcp.py",
+            "--mode",
+            "python",
+            "--settings-path",
+            str(settings_path),
+        ],
+    )
+
+    exit_code = install_gemini_mcp.main()
+
+    assert exit_code == 0
+    settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert "evernote-mcp-server" in settings_data["mcpServers"]

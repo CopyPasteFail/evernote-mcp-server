@@ -24,7 +24,7 @@ Most people should use the released Docker path. It is the shortest route to a w
 
 - Use [Quick Start: Released Docker + Gemini](#quick-start-released-docker--gemini) if you want the default end-user setup.
 - Use [Contributor Setup](#contributor-setup) if you are changing code, running tests, or debugging locally.
-- Use [Native Windows Local Python Setup](docs/WINDOWS.md) if you want Gemini CLI or Piebald to launch a cloned repo through `.venv\Scripts\python.exe` without WSL, Bash, or Docker.
+- Use [Native Windows Local Python Setup](docs/WINDOWS.md) if you want Gemini CLI to launch a cloned repo through `.venv\Scripts\python.exe` without WSL, Bash, or Docker.
 - Use [Troubleshooting](#troubleshooting) if setup fails after you follow the matching path below.
 
 ## Configuration and Auth Model
@@ -177,6 +177,8 @@ python3 scripts/install_gemini_mcp.py --mode python
 ```
 
 This path installs development dependencies, runs OAuth bootstrap against your local environment, and optionally updates Gemini settings so Gemini can launch the local Python runtime. Do not use a manually launched `--transport stdio` process as an end-to-end test; stdio MCP expects JSON-RPC from a client.
+
+The local installer writes Gemini CLI settings. Before running it, confirm Gemini CLI is installed with `gemini --version` or `Get-Command gemini`, then run `gemini` once and sign in with the Google account that has your Gemini subscription. Use `--print-config` when you only want JSON to inspect or copy into another MCP client manually.
 
 ### Option B: Local Docker Runtime
 

@@ -16,6 +16,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -24,6 +26,10 @@ DEFAULT_SETTINGS_PATH = "~/.gemini/settings.json"
 DEFAULT_DOCKER_IMAGE = "evernote-mcp-server:local"
 DEFAULT_DOCKER_VOLUME = "evernote-mcp-auth"
 SUPPORTED_MODES = ("python", "docker")
+MISSING_GEMINI_CLI_MESSAGE = (
+    "Gemini CLI was not found on PATH. Install Gemini CLI and authenticate it "
+    "with your Google account before installing this MCP entry."
+)
 
 
 def default_python_executable(repository_path: Path, platform_name: str) -> Path:
@@ -188,6 +194,11 @@ def upsert_mcp_server_entry(
     return True
 
 
+def gemini_cli_is_available() -> bool:
+    """Return whether Gemini CLI is available on PATH."""
+    return shutil.which("gemini") is not None
+
+
 def parse_arguments() -> argparse.Namespace:
     """Parse CLI arguments for the Gemini MCP installer.
 
@@ -208,7 +219,7 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Install/update evernote-mcp-server development entries in "
-            "Gemini settings."
+            "Gemini CLI settings."
         )
     )
     parser.add_argument(
@@ -278,6 +289,11 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Print the generated MCP server entry and exit without writing settings.",
     )
+    parser.add_argument(
+        "--skip-gemini-check",
+        action="store_true",
+        help="Skip checking that Gemini CLI is installed before writing settings.",
+    )
     return parser.parse_args()
 
 
@@ -325,6 +341,10 @@ def main() -> int:
     if arguments.print_config:
         print(json.dumps(target_server_config, indent=2))
         return 0
+
+    if not arguments.skip_gemini_check and not gemini_cli_is_available():
+        print(MISSING_GEMINI_CLI_MESSAGE, file=sys.stderr)
+        return 5
 
     settings_data = load_settings_json(settings_path)
     did_change_settings = upsert_mcp_server_entry(
