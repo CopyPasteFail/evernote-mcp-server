@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -25,11 +26,30 @@ DEFAULT_DOCKER_VOLUME = "evernote-mcp-auth"
 SUPPORTED_MODES = ("python", "docker")
 
 
-def build_python_server_config(repository_path: Path) -> dict[str, Any]:
+def default_python_executable(repository_path: Path, platform_name: str) -> Path:
+    """Return the repo-local virtualenv Python path for the current OS."""
+    if platform_name == "nt":
+        return repository_path / ".venv" / "Scripts" / "python.exe"
+    return repository_path / ".venv" / "bin" / "python"
+
+
+def build_python_server_config(
+    repository_path: Path,
+    python_executable: Path | None = None,
+    read_only: str = "true",
+    sandbox: str = "false",
+    log_level: str = "INFO",
+    platform_name: str | None = None,
+) -> dict[str, Any]:
     """Build Gemini MCP server configuration for local Python development.
 
     Inputs:
     - repository_path: absolute repository root used as Gemini `cwd`
+    - python_executable: optional Python executable override
+    - read_only: default READ_ONLY environment value
+    - sandbox: default EVERNOTE_SANDBOX environment value
+    - log_level: default LOG_LEVEL environment value
+    - platform_name: OS selector, defaults to `os.name`
 
     Output:
     - A JSON-serializable dict for one `mcpServers` entry
@@ -41,13 +61,22 @@ def build_python_server_config(repository_path: Path) -> dict[str, Any]:
     Concurrency/atomicity:
     - Pure function with no side effects.
     """
+    selected_platform_name = platform_name or os.name
+    selected_python_executable = python_executable or default_python_executable(
+        repository_path=repository_path,
+        platform_name=selected_platform_name,
+    )
+
     return {
-        "command": "bash",
-        "args": [
-            "-lc",
-            "source .venv/bin/activate && PYTHONPATH=src python -m evernote_mcp --transport stdio",
-        ],
+        "command": str(selected_python_executable),
+        "args": ["-m", "evernote_mcp", "--transport", "stdio"],
         "cwd": str(repository_path),
+        "env": {
+            "PYTHONPATH": str(repository_path / "src"),
+            "READ_ONLY": read_only,
+            "EVERNOTE_SANDBOX": sandbox,
+            "LOG_LEVEL": log_level,
+        },
         "trust": True,
     }
 
@@ -219,6 +248,36 @@ def parse_arguments() -> argparse.Namespace:
             f"(default: {DEFAULT_DOCKER_VOLUME})."
         ),
     )
+    parser.add_argument(
+        "--python-executable",
+        default=None,
+        help=(
+            "Python executable for python mode (default: repo-local "
+            ".venv Python for the current OS)."
+        ),
+    )
+    parser.add_argument(
+        "--read-only",
+        default="true",
+        choices=("true", "false"),
+        help="READ_ONLY env value for python mode (default: true).",
+    )
+    parser.add_argument(
+        "--sandbox",
+        default="false",
+        choices=("true", "false"),
+        help="EVERNOTE_SANDBOX env value for python mode (default: false).",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        help="LOG_LEVEL env value for python mode (default: INFO).",
+    )
+    parser.add_argument(
+        "--print-config",
+        action="store_true",
+        help="Print the generated MCP server entry and exit without writing settings.",
+    )
     return parser.parse_args()
 
 
@@ -244,13 +303,28 @@ def main() -> int:
     repository_path = Path(arguments.repo_path).expanduser().resolve()
 
     if arguments.mode == "python":
-        target_server_config = build_python_server_config(repository_path)
+        python_executable = (
+            Path(arguments.python_executable).expanduser().resolve()
+            if arguments.python_executable
+            else None
+        )
+        target_server_config = build_python_server_config(
+            repository_path=repository_path,
+            python_executable=python_executable,
+            read_only=arguments.read_only,
+            sandbox=arguments.sandbox,
+            log_level=arguments.log_level,
+        )
     else:
         target_server_config = build_docker_server_config(
             repository_path=repository_path,
             docker_image=arguments.docker_image,
             docker_volume_name=arguments.docker_volume,
         )
+
+    if arguments.print_config:
+        print(json.dumps(target_server_config, indent=2))
+        return 0
 
     settings_data = load_settings_json(settings_path)
     did_change_settings = upsert_mcp_server_entry(

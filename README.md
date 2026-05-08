@@ -24,6 +24,7 @@ Most people should use the released Docker path. It is the shortest route to a w
 
 - Use [Quick Start: Released Docker + Gemini](#quick-start-released-docker--gemini) if you want the default end-user setup.
 - Use [Contributor Setup](#contributor-setup) if you are changing code, running tests, or debugging locally.
+- Use [Native Windows Local Python Setup](docs/WINDOWS.md) if you want Gemini CLI or Piebald to launch a cloned repo through `.venv\Scripts\python.exe` without WSL, Bash, or Docker.
 - Use [Troubleshooting](#troubleshooting) if setup fails after you follow the matching path below.
 
 ## Configuration and Auth Model
@@ -165,16 +166,17 @@ After that shared setup, choose one local runtime.
 
 Use this path when you want the fastest edit-run-test loop and direct access to the Python process.
 
+On native Windows, follow the dedicated [Native Windows Local Python Setup](docs/WINDOWS.md) instead of the POSIX shell commands below.
+
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 PYTHONPATH=src python -m evernote_mcp auth
-PYTHONPATH=src python -m evernote_mcp --transport stdio
 python3 scripts/install_gemini_mcp.py --mode python
 ```
 
-This path installs development dependencies, runs OAuth bootstrap against your local environment, lets you start the server directly, and optionally updates Gemini settings so Gemini can launch the local Python runtime.
+This path installs development dependencies, runs OAuth bootstrap against your local environment, and optionally updates Gemini settings so Gemini can launch the local Python runtime. Do not use a manually launched `--transport stdio` process as an end-to-end test; stdio MCP expects JSON-RPC from a client.
 
 ### Option B: Local Docker Runtime
 
