@@ -1,5 +1,6 @@
-﻿fastmcp==3.2.4
+fastmcp==3.2.4
 evernote3==1.25.14
 python-dotenv==1.2.2
 requests-oauthlib==2.0.0
 thrift==0.22.0
+defusedxml==0.7.1
