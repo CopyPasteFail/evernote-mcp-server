@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import html
-from xml.etree import ElementTree
+from defusedxml.ElementTree import fromstring as safe_xml_fromstring
+# stdlib ElementTree is used only for ENML element construction; parsing uses defusedxml.
+from xml.etree import ElementTree  # nosec B405
 
 ENML_PREFIX = (
     '<?xml version="1.0" encoding="UTF-8"?>'
@@ -113,7 +115,7 @@ def _parse_en_note(existing_enml: str) -> ElementTree.Element:
 
     en_note_fragment = existing_enml[start_index : end_index + len("</en-note>")]
     try:
-        en_note = ElementTree.fromstring(en_note_fragment)
+        en_note = safe_xml_fromstring(en_note_fragment)
     except ElementTree.ParseError as error:
         raise ValueError("Existing note content is not parseable ENML.") from error
 
