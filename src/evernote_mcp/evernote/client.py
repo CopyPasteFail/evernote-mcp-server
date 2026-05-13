@@ -9,6 +9,7 @@ from evernote_mcp.evernote.enml import (
     append_plaintext_to_existing_enml,
     build_enml_document,
     escape_plaintext_for_enml,
+    insert_plaintext_near_anchor_in_enml,
 )
 from evernote_mcp.evernote.thrift_client import EvernoteThriftClient
 
@@ -204,6 +205,61 @@ class EvernoteGateway:
         )
         note.content = append_plaintext_to_existing_enml(note.content or "", plaintext_content)
         updated_note = self._call_note_store_method("updateNote", note)
+        return self._serialize_evernote_value(updated_note)
+
+    def insert_plaintext_near_anchor(
+        self,
+        note_guid: str,
+        anchor_text: str,
+        plaintext_content: str,
+        position: str = "after",
+        occurrence: int = 1,
+    ) -> dict[str, Any]:
+        """Insert plaintext before or after existing visible text in a rich note.
+
+        Args:
+            note_guid: Evernote note GUID for the target note.
+            anchor_text: Existing visible text used to locate the insertion point.
+            plaintext_content: Plain text to insert. It is escaped before being
+                converted into ENML.
+            position: Either `before` or `after` the matched top-level block.
+            occurrence: One-based match number when the anchor appears multiple
+                times.
+
+        Returns:
+            Serialized updated note dictionary.
+
+        Failure modes:
+            Raises `ValueError` for invalid ENML or missing anchors.
+            Raises `EvernoteApiError` if the note changed between fetch and
+            update, or if Evernote rejects the request.
+        """
+
+        note = cast(
+            NoteLike,
+            self._call_note_store_method(
+                "getNote",
+                note_guid,
+                True,
+                False,
+                False,
+                False,
+            ),
+        )
+        note.content = insert_plaintext_near_anchor_in_enml(
+            existing_enml=note.content or "",
+            anchor_text=anchor_text,
+            plaintext_content=plaintext_content,
+            position=position,
+            occurrence=occurrence,
+        )
+        update_result = self._call_note_store_method("updateNoteIfUsnMatches", note)
+        if getattr(update_result, "updated", True) is False:
+            raise EvernoteApiError(
+                "Evernote note changed before update; fetch the latest note and retry."
+            )
+
+        updated_note = getattr(update_result, "note", update_result)
         return self._serialize_evernote_value(updated_note)
 
     def set_note_title(self, note_guid: str, new_title: str) -> dict[str, Any]:
