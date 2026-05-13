@@ -9,7 +9,9 @@ This server exposes Evernote operations as MCP tools. The current tool surface i
 
 - Notebook tools: `list_notebooks`
 - Read tools: `search_notes`, `get_note`, `get_note_metadata`
-- Write tools: `append_to_note_plaintext`, `set_note_title`, `add_tags_by_name`, `move_note`, `create_note`, `delete_note`
+- Write tools: `append_to_note_plaintext`, `insert_into_note_plaintext`, `set_note_title`, `add_tags_by_name`, `move_note`, `create_note`, `delete_note`
+
+`insert_into_note_plaintext` supports non-destructive middle insertion for rich notes by fetching the current ENML, inserting an escaped plaintext block before or after a visible text anchor, and saving the full ENML document back to Evernote with optimistic concurrency. It does not accept raw ENML or HTML.
 
 ## Important Defaults Before You Start
 

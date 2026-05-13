@@ -37,11 +37,14 @@ The architecture is intentionally transport-agnostic: tool modules and Evernote 
 
 In practice, every `@mcp_server.tool(...)` decorator adds one callable MCP capability. For write operations, `src/evernote_mcp/tools/write_notes.py` currently exposes:
 - `append_to_note_plaintext`
+- `insert_into_note_plaintext`
 - `set_note_title`
 - `add_tags_by_name`
 - `move_note`
 - `create_note`
 - `delete_note`
+
+`insert_into_note_plaintext` is the safe middle-insertion path for existing rich notes. It fetches the full ENML body, parses the `<en-note>` document, inserts escaped plaintext as a new top-level `<div>` before or after the block containing a caller-provided visible text anchor, and persists the full note through Evernote's optimistic `updateNoteIfUsnMatches` API. This is deliberately a full-note read-modify-write operation because Evernote does not expose a server-side DOM patch API. The tool does not accept raw ENML, HTML, or Markdown-rendering requests.
 
 Those names, together with the read and notebook tools registered from the other modules, are what an MCP client such as Gemini CLI receives when it asks the server for available tools.
 

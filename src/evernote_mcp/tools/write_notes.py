@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
@@ -73,6 +73,36 @@ OptionalTagNames = Annotated[
             "Optional tag names to attach during creation. Missing tags are "
             "created automatically."
         )
+    ),
+]
+AnchorText = Annotated[
+    str,
+    Field(
+        min_length=1,
+        description=(
+            "Existing visible note text used as the insertion anchor. The new "
+            "plaintext block is inserted before or after the top-level ENML block "
+            "containing this text."
+        ),
+    ),
+]
+InsertionPosition = Annotated[
+    Literal["before", "after"],
+    Field(
+        description=(
+            "Whether to insert the new plaintext block before or after the block "
+            "that contains anchor_text."
+        )
+    ),
+]
+AnchorOccurrence = Annotated[
+    int,
+    Field(
+        ge=1,
+        description=(
+            "One-based occurrence to use when anchor_text appears in multiple "
+            "top-level note blocks."
+        ),
     ),
 ]
 
@@ -156,6 +186,51 @@ def register_write_note_tools(
 
         _enforce_write_policy()
         return evernote_gateway.set_note_title(note_guid=note_guid, new_title=new_title)
+
+    def insert_into_note_plaintext(
+        note_guid: NoteGuid,
+        anchor_text: AnchorText,
+        plaintext_content: PlaintextContent,
+        position: InsertionPosition = "after",
+        occurrence: AnchorOccurrence = 1,
+    ) -> dict[str, Any]:
+        """Insert plain text before or after existing text in a rich note.
+
+        Args:
+            note_guid: Evernote note GUID returned by `search_notes`.
+            anchor_text: Existing visible text to locate in the note.
+            plaintext_content: Plain text to insert. Do not send ENML or HTML.
+                Newlines are preserved and text is escaped before insertion.
+            position: Insert `before` or `after` the top-level ENML block
+                containing `anchor_text`.
+            occurrence: One-based match number when the anchor appears multiple
+                times.
+
+        Use first:
+            Call `get_note` first to inspect the current ENML content and choose
+            a stable `anchor_text`. Use a longer anchor when repeated sections
+            might otherwise match the wrong block.
+
+        Returns keys:
+            `guid`, `title`, `content`, `updated`, `notebookGuid`, `tagGuids`.
+            Evernote may include additional fields.
+
+        Fails when:
+            Raises `WriteAccessError` when the server is in read-only mode.
+            Raises `ValueError` if the anchor is missing or existing ENML cannot
+            be parsed.
+            Raises `EvernoteApiError` if the note changed before update or the
+            Evernote update request fails.
+        """
+
+        _enforce_write_policy()
+        return evernote_gateway.insert_plaintext_near_anchor(
+            note_guid=note_guid,
+            anchor_text=anchor_text,
+            plaintext_content=plaintext_content,
+            position=position,
+            occurrence=occurrence,
+        )
 
     def add_tags_by_name(note_guid: NoteGuid, tag_names: TagNames) -> dict[str, Any]:
         """Attach tags to a note by name, creating missing tags automatically.
@@ -287,6 +362,7 @@ def register_write_note_tools(
         return evernote_gateway.delete_note(note_guid=note_guid)
 
     mcp_server.tool(name="append_to_note_plaintext")(append_to_note_plaintext)
+    mcp_server.tool(name="insert_into_note_plaintext")(insert_into_note_plaintext)
     mcp_server.tool(name="set_note_title")(set_note_title)
     mcp_server.tool(name="add_tags_by_name")(add_tags_by_name)
     mcp_server.tool(name="move_note")(move_note)
