@@ -11,7 +11,10 @@ lint:
 
 security:
 	PYTHONPATH=src $(PYTHON) -m bandit -q -r src
-	PYTHONPATH=src $(PYTHON) -m pip_audit -r requirements.txt
+	# Temporary: pyjwt is transitive via fastmcp -> fastmcp-slim -> mcp.
+	# pip-audit reports PYSEC-2025-183 with no fix version available yet.
+	# Dependabot is configured for weekly pip updates; remove this after #25 is fixed.
+	PYTHONPATH=src $(PYTHON) -m pip_audit -r requirements.txt --ignore-vuln PYSEC-2025-183
 
 test:
 	PYTHONPATH=src $(PYTHON) -m pytest -q
