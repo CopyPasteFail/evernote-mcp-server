@@ -143,7 +143,20 @@ class EvernoteGateway:
             Raises `EvernoteApiError` if the note fetch fails.
         """
 
-        note = self._run_api_call("getNote", lambda: self._thrift_client.get_note(note_guid))
+        try:
+            note = self._run_api_call("getNote", lambda: self._thrift_client.get_note(note_guid))
+        except EvernoteApiError as error:
+            if self._error_chain_mentions(error, "EDAMSystemException"):
+                metadata = self._safe_get_note_metadata_after_content_failure(note_guid)
+                raise EvernoteApiError(
+                    "Evernote failed to load full note content with EDAMSystemException. "
+                    "Metadata is still available through get_note_metadata; avoid write "
+                    "tools that require full ENML content until the note can be fetched. "
+                    f"metadata={metadata}"
+                ) from error
+
+            raise
+
         return self._serialize_evernote_value(note)
 
     def get_note_metadata(self, note_guid: str) -> dict[str, Any]:
@@ -192,17 +205,7 @@ class EvernoteGateway:
             Raises `ValueError` if the stored note content is not valid ENML.
         """
 
-        note = cast(
-            NoteLike,
-            self._call_note_store_method(
-            "getNote",
-            note_guid,
-            True,
-            False,
-            False,
-            False,
-            ),
-        )
+        note = self._get_note_content_for_write(note_guid)
         note.content = append_plaintext_to_existing_enml(note.content or "", plaintext_content)
         updated_note = self._call_note_store_method("updateNote", note)
         return self._serialize_updated_note(updated_note, fallback_note=note)
@@ -235,17 +238,7 @@ class EvernoteGateway:
             update, or if Evernote rejects the request.
         """
 
-        note = cast(
-            NoteLike,
-            self._call_note_store_method(
-                "getNote",
-                note_guid,
-                True,
-                False,
-                False,
-                False,
-            ),
-        )
+        note = self._get_note_content_for_write(note_guid)
         note.content = insert_plaintext_near_anchor_in_enml(
             existing_enml=note.content or "",
             anchor_text=anchor_text,
@@ -424,6 +417,13 @@ class EvernoteGateway:
                     "the note in the default notebook and move it afterward."
                 ) from error
 
+            if self._error_chain_mentions(error, "EDAMSystemException"):
+                raise EvernoteApiError(
+                    "Evernote rejected createNote with EDAMSystemException. "
+                    "Retry later; if using a target notebook, refresh notebooks "
+                    "and retry, or create in the default notebook first."
+                ) from error
+
             raise
 
         return self._serialize_evernote_value(created_note)
@@ -458,6 +458,50 @@ class EvernoteGateway:
             "guid": note_guid,
             "deleted": True,
             "updateSequenceNum": self._serialize_evernote_value(update_sequence_number),
+        }
+
+    def _get_note_content_for_write(self, note_guid: str) -> NoteLike:
+        """Fetch full note content for write flows with clearer failure context."""
+
+        try:
+            return cast(
+                NoteLike,
+                self._call_note_store_method(
+                    "getNote",
+                    note_guid,
+                    True,
+                    False,
+                    False,
+                    False,
+                ),
+            )
+        except EvernoteApiError as error:
+            if self._error_chain_mentions(error, "EDAMSystemException"):
+                metadata = self._safe_get_note_metadata_after_content_failure(note_guid)
+                raise EvernoteApiError(
+                    "Evernote failed to load full note content for a write operation "
+                    "with EDAMSystemException. Metadata is still available through "
+                    "get_note_metadata, but write tools that modify ENML need the full "
+                    f"note body first. metadata={metadata}"
+                ) from error
+
+            raise
+
+    def _safe_get_note_metadata_after_content_failure(self, note_guid: str) -> dict[str, Any]:
+        """Best-effort metadata lookup used only to improve content-failure errors."""
+
+        try:
+            metadata = self.get_note_metadata(note_guid)
+        except EvernoteApiError:
+            return {"guid": note_guid, "metadataAvailable": False}
+
+        return {
+            "guid": metadata.get("guid", note_guid),
+            "title": metadata.get("title"),
+            "contentLength": metadata.get("contentLength"),
+            "updated": metadata.get("updated"),
+            "notebookGuid": metadata.get("notebookGuid"),
+            "metadataAvailable": True,
         }
 
     def _resolve_visible_notebook_name(self, notebook_guid: str) -> str | None:

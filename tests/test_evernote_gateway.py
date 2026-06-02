@@ -290,3 +290,87 @@ def test_create_note_adds_context_when_visible_notebook_is_rejected() -> None:
         )
 
     assert note.notebookGuid == "target-guid"
+
+
+def test_get_note_adds_metadata_context_when_full_content_fetch_fails() -> None:
+    """Ensure full-content failures point callers to metadata fallback."""
+
+    mocked_thrift_client = SimpleNamespace(
+        get_note=Mock(
+            side_effect=EvernoteApiError(
+                "Evernote API call 'getNote' failed with EDAMSystemException."
+            )
+        ),
+        get_note_metadata=Mock(
+            return_value=SimpleNamespace(
+                guid="note-guid",
+                title="Large note",
+                notebookGuid="notebook-guid",
+                updated=123,
+            )
+        ),
+    )
+    gateway = EvernoteGateway(
+        authentication_token="token",
+        thrift_client=cast(EvernoteThriftClient, mocked_thrift_client),
+    )
+
+    with pytest.raises(EvernoteApiError, match="Metadata is still available"):
+        gateway.get_note("note-guid")
+
+    mocked_thrift_client.get_note_metadata.assert_called_once_with("note-guid")
+
+
+def test_append_to_note_plaintext_adds_context_when_full_content_fetch_fails() -> None:
+    """Ensure write flows explain that full ENML content is required."""
+
+    mocked_thrift_client = SimpleNamespace(
+        call_note_store_method=Mock(
+            side_effect=EvernoteApiError(
+                "Evernote API call 'getNote' failed with EDAMSystemException."
+            )
+        ),
+        get_note_metadata=Mock(
+            return_value=SimpleNamespace(
+                guid="note-guid",
+                title="Large note",
+                notebookGuid="notebook-guid",
+                updated=123,
+            )
+        ),
+    )
+    gateway = EvernoteGateway(
+        authentication_token="token",
+        thrift_client=cast(EvernoteThriftClient, mocked_thrift_client),
+    )
+
+    with pytest.raises(EvernoteApiError, match="write operation"):
+        gateway.append_to_note_plaintext(
+            note_guid="note-guid",
+            plaintext_content="new text",
+        )
+
+    mocked_thrift_client.get_note_metadata.assert_called_once_with("note-guid")
+
+
+def test_create_note_adds_context_when_create_fails_with_system_exception() -> None:
+    """Ensure createNote system failures get a clearer action-oriented message."""
+
+    mocked_thrift_client = SimpleNamespace(
+        build_note=Mock(return_value=SimpleNamespace(title="New note", content="")),
+        call_note_store_method=Mock(
+            side_effect=EvernoteApiError(
+                "Evernote API call 'createNote' failed with EDAMSystemException."
+            )
+        ),
+    )
+    gateway = EvernoteGateway(
+        authentication_token="token",
+        thrift_client=cast(EvernoteThriftClient, mocked_thrift_client),
+    )
+
+    with pytest.raises(EvernoteApiError, match="rejected createNote"):
+        gateway.create_note(
+            title="New note",
+            plaintext_body="Body",
+        )
