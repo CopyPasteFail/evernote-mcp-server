@@ -395,6 +395,14 @@ class EvernoteGateway:
             Raises `EvernoteApiError` if note creation or tag resolution fails.
         """
 
+        if notebook_guid:
+            visible_notebook_name = self._resolve_visible_notebook_name(notebook_guid)
+            if visible_notebook_name is None:
+                raise EvernoteApiError(
+                    "Evernote notebook_guid is not visible from list_notebooks; "
+                    "refresh notebooks and retry."
+                )
+
         enml_content = build_enml_document(escape_plaintext_for_enml(plaintext_body))
         note = cast(
             NoteLike,
@@ -406,7 +414,18 @@ class EvernoteGateway:
         if tag_names:
             note.tagGuids = self._resolve_tag_guids_by_name(tag_names)
 
-        created_note = self._call_note_store_method("createNote", note)
+        try:
+            created_note = self._call_note_store_method("createNote", note)
+        except EvernoteApiError as error:
+            if notebook_guid and self._error_chain_mentions(error, "EDAMNotFoundException"):
+                raise EvernoteApiError(
+                    "Evernote createNote rejected a notebook_guid that was visible "
+                    "from list_notebooks; refresh notebooks and retry, or create "
+                    "the note in the default notebook and move it afterward."
+                ) from error
+
+            raise
+
         return self._serialize_evernote_value(created_note)
 
     def delete_note(self, note_guid: str) -> dict[str, Any]:
@@ -440,6 +459,21 @@ class EvernoteGateway:
             "deleted": True,
             "updateSequenceNum": self._serialize_evernote_value(update_sequence_number),
         }
+
+    def _resolve_visible_notebook_name(self, notebook_guid: str) -> str | None:
+        """Return the visible notebook name for a GUID, or None when not listed."""
+
+        for notebook in self.list_notebooks():
+            if notebook.get("guid") != notebook_guid:
+                continue
+
+            notebook_name = notebook.get("name")
+            if isinstance(notebook_name, str):
+                return notebook_name
+
+            return ""
+
+        return None
 
     def _update_note_with_usn_match_when_available(self, note: NoteLike) -> Any:
         """Update a note with optimistic concurrency when the client supports it.

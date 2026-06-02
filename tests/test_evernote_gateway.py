@@ -239,3 +239,54 @@ def test_insert_plaintext_near_anchor_falls_back_when_usn_update_is_unavailable(
     assert serialized_note["content"] is not None
     assert "inserted text" in serialized_note["content"]
     mocked_thrift_client.call_note_store_method.assert_any_call("updateNote", note)
+
+
+def test_create_note_rejects_notebook_guid_not_visible_from_list_notebooks() -> None:
+    """Ensure create_note fails before writing when a notebook GUID is not listed."""
+
+    mocked_thrift_client = SimpleNamespace(
+        list_notebooks=Mock(return_value=[SimpleNamespace(guid="other-guid", name="Other")]),
+    )
+    gateway = EvernoteGateway(
+        authentication_token="token",
+        thrift_client=cast(EvernoteThriftClient, mocked_thrift_client),
+    )
+
+    with pytest.raises(EvernoteApiError, match="not visible from list_notebooks"):
+        gateway.create_note(
+            title="New note",
+            plaintext_body="Body",
+            notebook_guid="missing-guid",
+        )
+
+    mocked_thrift_client.list_notebooks.assert_called_once()
+
+
+def test_create_note_adds_context_when_visible_notebook_is_rejected() -> None:
+    """Ensure create_note explains visible-but-rejected notebook GUIDs."""
+
+    note = SimpleNamespace(guid=None, title="New note", content=None)
+    mocked_thrift_client = SimpleNamespace(
+        list_notebooks=Mock(
+            return_value=[SimpleNamespace(guid="target-guid", name="AI - General")]
+        ),
+        build_note=Mock(return_value=note),
+        call_note_store_method=Mock(
+            side_effect=EvernoteApiError(
+                "Evernote API call 'createNote' failed with EDAMNotFoundException."
+            )
+        ),
+    )
+    gateway = EvernoteGateway(
+        authentication_token="token",
+        thrift_client=cast(EvernoteThriftClient, mocked_thrift_client),
+    )
+
+    with pytest.raises(EvernoteApiError, match="visible from list_notebooks"):
+        gateway.create_note(
+            title="New note",
+            plaintext_body="Body",
+            notebook_guid="target-guid",
+        )
+
+    assert note.notebookGuid == "target-guid"
