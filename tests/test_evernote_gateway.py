@@ -475,3 +475,58 @@ def test_insert_plaintext_near_anchor_uses_minimal_update_note() -> None:
     assert not hasattr(update_note, "resources")
     assert not hasattr(update_note, "tagGuids")
     assert serialized_note["content"] == update_note.content
+
+
+def test_update_note_rte_room_error_gets_actionable_message() -> None:
+    """Ensure Evernote RTE-room locks get safe actionable guidance."""
+
+    rte_error = type(
+        "EDAMSystemException",
+        (Exception,),
+        {},
+    )()
+    rte_error.errorCode = 19
+    rte_error.message = "Attempt updateNote where RTE room has already been open for note: note-guid"
+    rte_error.rateLimitDuration = 60
+
+    mocked_thrift_client = SimpleNamespace(
+        call_note_store_method=Mock(side_effect=rte_error),
+    )
+    gateway = EvernoteGateway(
+        authentication_token="token",
+        thrift_client=cast(EvernoteThriftClient, mocked_thrift_client),
+    )
+
+    with pytest.raises(EvernoteApiError) as error_info:
+        gateway.set_note_title(
+            note_guid="note-guid",
+            new_title="Existing note",
+        )
+
+    error_message = str(error_info.value)
+    assert "rich-text editor" in error_message
+    assert "Close the note in Evernote clients" in error_message
+    assert "60 seconds" in error_message
+    assert "note-guid" not in error_message
+
+
+def test_non_rte_system_error_remains_generic() -> None:
+    """Ensure unrelated EDAM system errors stay sanitized and generic."""
+
+    system_error = type(
+        "EDAMSystemException",
+        (Exception,),
+        {},
+    )()
+    system_error.errorCode = 19
+    system_error.message = "Some other upstream detail with note-guid"
+    system_error.rateLimitDuration = 60
+
+    mocked_thrift_client = SimpleNamespace(call_note_store_method=Mock())
+    gateway = EvernoteGateway(
+        authentication_token="token",
+        thrift_client=cast(EvernoteThriftClient, mocked_thrift_client),
+    )
+    safe_error = gateway._build_safe_api_error("updateNote", system_error)
+
+    assert str(safe_error) == "Evernote API call 'updateNote' failed with EDAMSystemException."

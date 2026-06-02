@@ -723,9 +723,31 @@ class EvernoteGateway:
             authentication tokens, request details, or note content.
         """
 
+        if self._is_rte_room_open_error(error):
+            rate_limit_duration = getattr(error, "rateLimitDuration", None)
+            retry_hint = (
+                f" Wait at least {rate_limit_duration} seconds before retrying."
+                if isinstance(rate_limit_duration, int) and rate_limit_duration > 0
+                else " Wait before retrying."
+            )
+            return EvernoteApiError(
+                f"Evernote API call '{method_name}' failed because the note appears "
+                "to be open in Evernote's rich-text editor. Close the note in "
+                f"Evernote clients and retry.{retry_hint}"
+            )
+
         exception_type_name = type(error).__name__
         return EvernoteApiError(
             f"Evernote API call '{method_name}' failed with {exception_type_name}."
+        )
+
+    def _is_rte_room_open_error(self, error: Exception) -> bool:
+        """Return whether Evernote rejected an update because an RTE room is open."""
+
+        return (
+            type(error).__name__ == "EDAMSystemException"
+            and getattr(error, "errorCode", None) == 19
+            and "RTE room" in str(getattr(error, "message", ""))
         )
 
     def _serialize_evernote_value(self, value: Any) -> Any:
