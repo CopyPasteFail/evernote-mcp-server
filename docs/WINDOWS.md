@@ -90,6 +90,28 @@ You can paste this JSON into another MCP client later, including Piebald after y
 
 This config launches the repo-local virtualenv Python directly. It does not use `bash`, `source`, WSL, Docker, or shell wrappers.
 
+## Development Checks In PowerShell
+
+Use these commands after code or documentation changes when you are validating from native Windows PowerShell. They mirror the repository Makefile checks without requiring `make`, Bash, WSL, or Docker.
+
+```powershell
+$env:PYTHONPATH = "src"
+.\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe -m bandit -q -r src
+.\.venv\Scripts\python.exe -m pip_audit -r requirements.txt --ignore-vuln PYSEC-2025-183
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+The `pip-audit` ignore matches the temporary project exception tracked in issue #25. Remove it only after the upstream dependency path is fixed and the repository security check no longer needs the exception.
+
+Run the local protocol smoke test when you need to verify that the stdio server can answer a minimal MCP initialize request:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\smoke_mcp_stdio.py
+```
+
+The smoke script starts the server subprocess, sends a minimal MCP `initialize` request, and checks for a JSON-RPC response. It still depends on your local `.env` and saved OAuth token being valid.
+
 ## Verification Notes
 
 Do not treat this command as an end-to-end test:
@@ -101,11 +123,3 @@ Do not treat this command as an end-to-end test:
 Stdio MCP servers wait for JSON-RPC messages from an MCP client. Starting the process by hand in a terminal can look idle even when the server is working.
 
 After Gemini CLI is configured, verify with a read-only MCP request such as `list_notebooks`. Keep `READ_ONLY=true` until you have confirmed the wiring and auth state. For Piebald or another client, copy the printed config manually and verify through that client's MCP flow.
-
-For a local protocol smoke test, you can run:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\smoke_mcp_stdio.py
-```
-
-The smoke script starts the server subprocess, sends a minimal MCP `initialize` request, and checks for a JSON-RPC response. It still depends on your local `.env` and saved OAuth token being valid.
