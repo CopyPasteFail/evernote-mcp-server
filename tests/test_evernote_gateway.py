@@ -114,21 +114,15 @@ def test_insert_plaintext_near_anchor_updates_note_with_usn_match() -> None:
         occurrence=1,
     )
 
-    assert "inserted &lt;safe&gt;" in note.content
-    mocked_thrift_client.call_note_store_method.assert_any_call(
-        "getNote",
-        "note-guid",
-        True,
-        False,
-        False,
-        False,
-    )
-    mocked_thrift_client.call_note_store_method.assert_any_call(
-        "updateNoteIfUsnMatches",
-        note,
-    )
+    update_call = mocked_thrift_client.call_note_store_method.call_args_list[1]
+    assert update_call.args[0] == "updateNoteIfUsnMatches"
+    update_note = update_call.args[1]
+    assert update_note.guid == "note-guid"
+    assert update_note.title == "Existing note"
+    assert "inserted &lt;safe&gt;" in update_note.content
+    assert "inserted &lt;safe&gt;" not in note.content
     assert serialized_note["guid"] == "note-guid"
-
+    assert serialized_note["content"] == ""
 
 def test_insert_plaintext_near_anchor_raises_when_usn_does_not_match() -> None:
     """Ensure concurrent edits are reported instead of overwritten."""
@@ -238,7 +232,13 @@ def test_insert_plaintext_near_anchor_falls_back_when_usn_update_is_unavailable(
     assert serialized_note["guid"] == "note-guid"
     assert serialized_note["content"] is not None
     assert "inserted text" in serialized_note["content"]
-    mocked_thrift_client.call_note_store_method.assert_any_call("updateNote", note)
+    update_call = mocked_thrift_client.call_note_store_method.call_args_list[-1]
+    assert update_call.args[0] == "updateNote"
+    update_note = update_call.args[1]
+    assert update_note.guid == "note-guid"
+    assert update_note.title == "Existing note"
+    assert "inserted text" in update_note.content
+    assert update_note is not note
 
 
 def test_create_note_rejects_notebook_guid_not_visible_from_list_notebooks() -> None:
@@ -374,3 +374,104 @@ def test_create_note_adds_context_when_create_fails_with_system_exception() -> N
             title="New note",
             plaintext_body="Body",
         )
+
+
+def test_append_to_note_plaintext_uses_minimal_update_note() -> None:
+    """Ensure content appends do not resend fetched read/computed note fields."""
+
+    source_note = SimpleNamespace(
+        guid="note-guid",
+        title="Existing note",
+        content=(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd">'
+            "<en-note><div>existing</div></en-note>"
+        ),
+        contentHash=b"computed",
+        contentLength=123,
+        resources=["resource"],
+        tagGuids=["tag-a"],
+    )
+    update_note = SimpleNamespace(guid=None, title=None, content=None)
+    mocked_thrift_client = SimpleNamespace(
+        call_note_store_method=Mock(
+            side_effect=[
+                source_note,
+                SimpleNamespace(guid="note-guid", content=None),
+            ]
+        ),
+        build_note=Mock(return_value=update_note),
+        get_note_metadata=Mock(),
+    )
+    gateway = EvernoteGateway(
+        authentication_token="token",
+        thrift_client=cast(EvernoteThriftClient, mocked_thrift_client),
+    )
+
+    serialized_note = gateway.append_to_note_plaintext(
+        note_guid="note-guid",
+        plaintext_content="appended",
+    )
+
+    mocked_thrift_client.build_note.assert_called_once()
+    mocked_thrift_client.call_note_store_method.assert_any_call("updateNote", update_note)
+    assert update_note.guid == "note-guid"
+    assert update_note.title == "Existing note"
+    assert "appended" in update_note.content
+    assert not hasattr(update_note, "contentHash")
+    assert not hasattr(update_note, "contentLength")
+    assert not hasattr(update_note, "resources")
+    assert not hasattr(update_note, "tagGuids")
+    assert serialized_note["content"] == update_note.content
+
+
+def test_insert_plaintext_near_anchor_uses_minimal_update_note() -> None:
+    """Ensure anchored inserts do not resend fetched read/computed note fields."""
+
+    source_note = SimpleNamespace(
+        guid="note-guid",
+        title="Existing note",
+        content=(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd">'
+            "<en-note><div>anchor block</div></en-note>"
+        ),
+        contentHash=b"computed",
+        contentLength=123,
+        resources=["resource"],
+        tagGuids=["tag-a"],
+    )
+    update_note = SimpleNamespace(guid=None, title=None, content=None)
+    mocked_thrift_client = SimpleNamespace(
+        call_note_store_method=Mock(
+            side_effect=[
+                source_note,
+                SimpleNamespace(updated=True, note=SimpleNamespace(guid="note-guid", content=None)),
+            ]
+        ),
+        build_note=Mock(return_value=update_note),
+        get_note_metadata=Mock(),
+    )
+    gateway = EvernoteGateway(
+        authentication_token="token",
+        thrift_client=cast(EvernoteThriftClient, mocked_thrift_client),
+    )
+
+    serialized_note = gateway.insert_plaintext_near_anchor(
+        note_guid="note-guid",
+        anchor_text="anchor block",
+        plaintext_content="inserted",
+    )
+
+    mocked_thrift_client.call_note_store_method.assert_any_call(
+        "updateNoteIfUsnMatches",
+        update_note,
+    )
+    assert update_note.guid == "note-guid"
+    assert update_note.title == "Existing note"
+    assert "inserted" in update_note.content
+    assert not hasattr(update_note, "contentHash")
+    assert not hasattr(update_note, "contentLength")
+    assert not hasattr(update_note, "resources")
+    assert not hasattr(update_note, "tagGuids")
+    assert serialized_note["content"] == update_note.content

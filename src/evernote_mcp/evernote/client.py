@@ -206,9 +206,13 @@ class EvernoteGateway:
         """
 
         note = self._get_note_content_for_write(note_guid)
-        note.content = append_plaintext_to_existing_enml(note.content or "", plaintext_content)
-        updated_note = self._call_note_store_method("updateNote", note)
-        return self._serialize_updated_note(updated_note, fallback_note=note)
+        updated_content = append_plaintext_to_existing_enml(note.content or "", plaintext_content)
+        update_note = self._build_content_update_note(
+            source_note=note,
+            updated_content=updated_content,
+        )
+        updated_note = self._call_note_store_method("updateNote", update_note)
+        return self._serialize_updated_note(updated_note, fallback_note=update_note)
 
     def insert_plaintext_near_anchor(
         self,
@@ -239,21 +243,25 @@ class EvernoteGateway:
         """
 
         note = self._get_note_content_for_write(note_guid)
-        note.content = insert_plaintext_near_anchor_in_enml(
+        updated_content = insert_plaintext_near_anchor_in_enml(
             existing_enml=note.content or "",
             anchor_text=anchor_text,
             plaintext_content=plaintext_content,
             position=position,
             occurrence=occurrence,
         )
-        update_result = self._update_note_with_usn_match_when_available(note)
+        update_note = self._build_content_update_note(
+            source_note=note,
+            updated_content=updated_content,
+        )
+        update_result = self._update_note_with_usn_match_when_available(update_note)
         if getattr(update_result, "updated", True) is False:
             raise EvernoteApiError(
                 "Evernote note changed before update; fetch the latest note and retry."
             )
 
         updated_note = getattr(update_result, "note", update_result)
-        return self._serialize_updated_note(updated_note, fallback_note=note)
+        return self._serialize_updated_note(updated_note, fallback_note=update_note)
 
     def set_note_title(self, note_guid: str, new_title: str) -> dict[str, Any]:
         """Replace a note title and persist the update.
@@ -459,6 +467,31 @@ class EvernoteGateway:
             "deleted": True,
             "updateSequenceNum": self._serialize_evernote_value(update_sequence_number),
         }
+
+    def _build_content_update_note(
+        self,
+        *,
+        source_note: NoteLike,
+        updated_content: str,
+    ) -> NoteLike:
+        """Build a minimal note object for content-only update operations."""
+
+        build_note = getattr(self._thrift_client, "build_note", None)
+        if build_note is None:
+            update_note = cast(NoteLike, type("MinimalNote", (), {})())
+        else:
+            update_note = cast(
+                NoteLike,
+                build_note(
+                    title=source_note.title or "",
+                    content=updated_content,
+                ),
+            )
+
+        update_note.guid = source_note.guid
+        update_note.title = source_note.title or ""
+        update_note.content = updated_content
+        return update_note
 
     def _get_note_content_for_write(self, note_guid: str) -> NoteLike:
         """Fetch full note content for write flows with clearer failure context."""
