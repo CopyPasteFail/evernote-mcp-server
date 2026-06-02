@@ -205,7 +205,7 @@ class EvernoteGateway:
         )
         note.content = append_plaintext_to_existing_enml(note.content or "", plaintext_content)
         updated_note = self._call_note_store_method("updateNote", note)
-        return self._serialize_evernote_value(updated_note)
+        return self._serialize_updated_note(updated_note, fallback_note=note)
 
     def insert_plaintext_near_anchor(
         self,
@@ -253,14 +253,14 @@ class EvernoteGateway:
             position=position,
             occurrence=occurrence,
         )
-        update_result = self._call_note_store_method("updateNoteIfUsnMatches", note)
+        update_result = self._update_note_with_usn_match_when_available(note)
         if getattr(update_result, "updated", True) is False:
             raise EvernoteApiError(
                 "Evernote note changed before update; fetch the latest note and retry."
             )
 
         updated_note = getattr(update_result, "note", update_result)
-        return self._serialize_evernote_value(updated_note)
+        return self._serialize_updated_note(updated_note, fallback_note=note)
 
     def set_note_title(self, note_guid: str, new_title: str) -> dict[str, Any]:
         """Replace a note title and persist the update.
@@ -440,6 +440,53 @@ class EvernoteGateway:
             "deleted": True,
             "updateSequenceNum": self._serialize_evernote_value(update_sequence_number),
         }
+
+    def _update_note_with_usn_match_when_available(self, note: NoteLike) -> Any:
+        """Update a note with optimistic concurrency when the client supports it.
+
+        Some Evernote client builds do not expose `updateNoteIfUsnMatches`. In
+        that case, fall back to `updateNote` so anchored insertion remains usable
+        instead of failing with an AttributeError before reaching Evernote.
+        """
+
+        try:
+            return self._call_note_store_method("updateNoteIfUsnMatches", note)
+        except EvernoteApiError as error:
+            if not self._error_chain_mentions(error, "AttributeError"):
+                raise
+
+            return self._call_note_store_method("updateNote", note)
+
+    def _error_chain_mentions(self, error: BaseException, text: str) -> bool:
+        """Return whether an exception or its causes mention a text fragment."""
+
+        current_error: BaseException | None = error
+        while current_error is not None:
+            if text in str(current_error):
+                return True
+
+            current_error = current_error.__cause__ or current_error.__context__
+
+        return False
+
+    def _serialize_updated_note(
+        self,
+        updated_note: Any,
+        *,
+        fallback_note: NoteLike,
+    ) -> dict[str, Any]:
+        """Serialize an updated note while preserving known updated ENML content.
+
+        Evernote may accept an update but return a note payload with `content`
+        omitted or set to `None`. Returning the in-memory updated content avoids
+        misleading MCP clients into treating a successful write as dropped data.
+        """
+
+        serialized_note = cast(dict[str, Any], self._serialize_evernote_value(updated_note))
+        if serialized_note.get("content") is None and fallback_note.content is not None:
+            serialized_note["content"] = fallback_note.content
+
+        return serialized_note
 
     def _resolve_tag_guids_by_name(self, tag_names: list[str]) -> list[str]:
         """Resolve tag names to GUIDs, creating tags that do not yet exist.

@@ -162,3 +162,80 @@ def test_insert_plaintext_near_anchor_raises_when_usn_does_not_match() -> None:
             anchor_text="anchor block",
             plaintext_content="inserted",
         )
+
+
+def test_append_to_note_plaintext_preserves_content_when_update_response_omits_it() -> None:
+    """Ensure successful appends do not return misleading null content."""
+
+    note = SimpleNamespace(
+        guid="note-guid",
+        title="Existing note",
+        content=(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd">'
+            "<en-note><div>existing</div></en-note>"
+        ),
+    )
+    updated_note = SimpleNamespace(guid="note-guid", content=None)
+    mocked_thrift_client = SimpleNamespace(
+        call_note_store_method=Mock(side_effect=[note, updated_note]),
+    )
+    gateway = EvernoteGateway(
+        authentication_token="token",
+        thrift_client=cast(EvernoteThriftClient, mocked_thrift_client),
+    )
+
+    serialized_note = gateway.append_to_note_plaintext(
+        note_guid="note-guid",
+        plaintext_content="appended text",
+    )
+
+    assert serialized_note["guid"] == "note-guid"
+    assert serialized_note["content"] is not None
+    assert "appended text" in serialized_note["content"]
+
+
+def test_insert_plaintext_near_anchor_falls_back_when_usn_update_is_unavailable() -> None:
+    """Ensure missing updateNoteIfUsnMatches does not break anchored insertion."""
+
+    note = SimpleNamespace(
+        guid="note-guid",
+        title="Existing note",
+        content=(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd">'
+            "<en-note><div>anchor block</div></en-note>"
+        ),
+        updateSequenceNum=123,
+    )
+
+    def fake_call_note_store_method(method_name: str, *_arguments: object) -> object:
+        if method_name == "getNote":
+            return note
+        if method_name == "updateNoteIfUsnMatches":
+            raise EvernoteApiError(
+                "Evernote API call 'updateNoteIfUsnMatches' failed with AttributeError."
+            )
+        if method_name == "updateNote":
+            return SimpleNamespace(guid="note-guid", content=None)
+
+        raise AssertionError(f"unexpected method: {method_name}")
+
+    mocked_thrift_client = SimpleNamespace(
+        call_note_store_method=Mock(side_effect=fake_call_note_store_method),
+    )
+    gateway = EvernoteGateway(
+        authentication_token="token",
+        thrift_client=cast(EvernoteThriftClient, mocked_thrift_client),
+    )
+
+    serialized_note = gateway.insert_plaintext_near_anchor(
+        note_guid="note-guid",
+        anchor_text="anchor block",
+        plaintext_content="inserted text",
+    )
+
+    assert serialized_note["guid"] == "note-guid"
+    assert serialized_note["content"] is not None
+    assert "inserted text" in serialized_note["content"]
+    mocked_thrift_client.call_note_store_method.assert_any_call("updateNote", note)
