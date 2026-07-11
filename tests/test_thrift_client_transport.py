@@ -51,6 +51,39 @@ def _install_transport_factory_stub(monkeypatch: pytest.MonkeyPatch) -> list[Stu
     return created_transports
 
 
+def test_evernote_protocol_preserves_generated_byte_string_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Support byte strings emitted by the legacy Evernote generated client."""
+
+    written_values: list[bytes | str] = []
+
+    class StubBinaryProtocol:
+        def __init__(self, transport: object) -> None:
+            self.transport = transport
+
+        def writeBinary(self, value: bytes) -> None:
+            written_values.append(value)
+
+        def writeString(self, value: str) -> None:
+            written_values.append(value)
+
+        def readString(self) -> str:
+            return "note-store-url"
+
+    monkeypatch.setattr(
+        thrift_client_module.TBinaryProtocol,
+        "TBinaryProtocol",
+        StubBinaryProtocol,
+    )
+
+    protocol = thrift_client_module._build_evernote_binary_protocol(object())
+    protocol.writeString(b"authentication-token")
+
+    assert written_values == [b"authentication-token"]
+    assert protocol.readString() == b"note-store-url"
+
+
 def test_call_note_store_method_opens_and_closes_transport_on_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
