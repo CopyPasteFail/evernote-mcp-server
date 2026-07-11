@@ -120,6 +120,27 @@ THttpClient = _load_module_or_fallback(
     SimpleNamespace(THttpClient=_missing_dependency_callable("thrift")),
 )
 
+
+def _build_evernote_binary_protocol(transport: Transport) -> Any:
+    """Build a protocol compatible with byte strings from the Evernote SDK."""
+
+    binary_protocol_class = TBinaryProtocol.TBinaryProtocol
+
+    class EvernoteBinaryProtocol(binary_protocol_class):
+        def writeString(self, string_value: str | bytes) -> None:
+            if isinstance(string_value, bytes):
+                self.writeBinary(string_value)
+                return
+            super().writeString(string_value)
+
+        def readString(self) -> bytes:
+            string_value = super().readString()
+            if isinstance(string_value, str):
+                return string_value.encode("utf-8")
+            return string_value
+
+    return EvernoteBinaryProtocol(transport)
+
 NoteFilter = cast(
     Callable[..., Any],
     getattr(
@@ -367,7 +388,7 @@ class EvernoteThriftClient:
         """
 
         user_store_transport: Transport = THttpClient.THttpClient(user_store_url)
-        user_store_protocol: Any = TBinaryProtocol.TBinaryProtocol(user_store_transport)
+        user_store_protocol = _build_evernote_binary_protocol(user_store_transport)
         return UserStore.Client(user_store_protocol), user_store_transport
 
     def _build_note_store_client(self, note_store_url: str) -> tuple[Any, Transport]:
@@ -381,7 +402,7 @@ class EvernoteThriftClient:
         """
 
         note_store_transport: Transport = THttpClient.THttpClient(note_store_url)
-        note_store_protocol: Any = TBinaryProtocol.TBinaryProtocol(note_store_transport)
+        note_store_protocol = _build_evernote_binary_protocol(note_store_transport)
         return NoteStore.Client(note_store_protocol), note_store_transport
 
     def _call_with_transport(

@@ -5,7 +5,7 @@
 Consolidate the six open Dependabot recommendations into one branch:
 
 - `fastmcp` 3.4.3
-- `thrift` 0.23.0
+- `thrift` 0.23.0, with a protocol adapter for `evernote3` byte strings
 - `pytest` 9.1.1
 - `ruff` 0.15.20
 - `pip-audit` 2.10.1
