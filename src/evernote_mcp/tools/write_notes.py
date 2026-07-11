@@ -14,95 +14,64 @@ NoteGuid = Annotated[
     str,
     Field(
         min_length=1,
-        description=(
-            "Evernote note GUID from search_notes notes[].guid. Pass it unchanged "
-            "as note_guid. Also use create_note result guid for follow-up edits."
-        ),
+        description="Evernote note GUID.",
     ),
 ]
 PlaintextContent = Annotated[
     str,
     Field(
-        description=(
-            "Plain text content. Do not send ENML or HTML. Newlines are "
-            "preserved when converted to Evernote ENML."
-        )
+        description="Plain text content. Do not send ENML or HTML. Newlines are preserved."
     ),
 ]
 NoteTitle = Annotated[
     str,
     Field(
-        description=(
-            "Full human-readable note title value."
-        )
+        description="Human-readable note title.",
     ),
 ]
 NotebookGuid = Annotated[
     str,
     Field(
         min_length=1,
-        description=(
-            "Evernote notebook GUID from list_notebooks[].guid. Pass it unchanged "
-            "as notebook_guid or destination_notebook_guid."
-        ),
+        description="Evernote notebook GUID.",
     ),
 ]
 TagNames = Annotated[
     list[str],
     Field(
-        description=(
-            "List of human-readable tag names. Blank names are ignored, "
-            "duplicates are removed case-insensitively, and missing tags are "
-            "created automatically."
-        )
+        description="Tag names. Blank names are ignored; missing tags are created automatically."
     ),
 ]
 OptionalNotebookGuid = Annotated[
     str | None,
     Field(
-        description=(
-            "Optional notebook GUID from list_notebooks[].guid. Omit to create in "
-            "Evernote's default notebook."
-        )
+        description="Optional destination notebook GUID. Omit for Evernote's default notebook."
     ),
 ]
 OptionalTagNames = Annotated[
     list[str] | None,
     Field(
-        description=(
-            "Optional tag names to attach during creation. Missing tags are "
-            "created automatically."
-        )
+        description="Optional tag names. Missing tags are created automatically."
     ),
 ]
 AnchorText = Annotated[
     str,
     Field(
         min_length=1,
-        description=(
-            "Existing visible note text used as the insertion anchor. The new "
-            "plaintext block is inserted before or after the top-level ENML block "
-            "containing this text."
-        ),
+        description="Existing visible text that identifies the insertion location.",
     ),
 ]
 InsertionPosition = Annotated[
     Literal["before", "after"],
     Field(
-        description=(
-            "Whether to insert the new plaintext block before or after the block "
-            "that contains anchor_text."
-        )
+        description="Insert before or after the matching block.",
     ),
 ]
 AnchorOccurrence = Annotated[
     int,
     Field(
         ge=1,
-        description=(
-            "One-based occurrence to use when anchor_text appears in multiple "
-            "top-level note blocks."
-        ),
+        description="One-based match number when the anchor appears more than once.",
     ),
 ]
 
@@ -132,28 +101,7 @@ def register_write_note_tools(
         note_guid: NoteGuid,
         plaintext_content: PlaintextContent,
     ) -> dict[str, Any]:
-        """Append plain text to an existing note body without replacing it.
-
-        Args:
-            note_guid: Evernote note GUID returned by `search_notes`.
-            plaintext_content: Plain text to append. Do not send ENML or HTML.
-                Newlines are preserved and the text is appended inside a new
-                ENML `<div>`.
-
-        Use first:
-            If `note_guid` is unknown, call `search_notes` first.
-            Call `get_note` first when you need to inspect current trailing
-            content and avoid duplicate or out-of-order appends.
-
-        Returns keys:
-            `guid`, `title`, `content`, `updated`, `notebookGuid`, `tagGuids`.
-            Evernote may include additional fields.
-
-        Fails when:
-            Raises `WriteAccessError` when the server is in read-only mode.
-            Raises `EvernoteApiError` if the note cannot be fetched or updated.
-            Raises `ValueError` if the existing note body is not valid ENML.
-        """
+        """Append plaintext to a note. Requires writes enabled."""
 
         _enforce_write_policy()
         return evernote_gateway.append_to_note_plaintext(
@@ -162,27 +110,7 @@ def register_write_note_tools(
         )
 
     def set_note_title(note_guid: NoteGuid, new_title: NoteTitle) -> dict[str, Any]:
-        """Replace the title of an existing note.
-
-        Args:
-            note_guid: Evernote note GUID returned by `search_notes`.
-            new_title: Full title string that should replace the existing title.
-
-        Use first:
-            If `note_guid` is unknown, call `search_notes` first.
-            Call `get_note_metadata` first when you need to confirm current title
-            or notebook placement without loading full ENML content, or to avoid
-            renaming to an already-correct title.
-
-        Returns keys:
-            `guid`, `title`, `updated`, `notebookGuid`, `tagGuids`.
-            Evernote may include additional fields.
-
-        Fails when:
-            Raises `WriteAccessError` when the server is in read-only mode.
-            Raises `EvernoteApiError` if the note does not exist, the title is
-            rejected by Evernote, or the update request fails.
-        """
+        """Replace a note title. Requires writes enabled."""
 
         _enforce_write_policy()
         return evernote_gateway.set_note_title(note_guid=note_guid, new_title=new_title)
@@ -194,33 +122,9 @@ def register_write_note_tools(
         position: InsertionPosition = "after",
         occurrence: AnchorOccurrence = 1,
     ) -> dict[str, Any]:
-        """Insert plain text before or after existing text in a rich note.
+        """Insert plaintext before or after a visible text anchor in a note.
 
-        Args:
-            note_guid: Evernote note GUID returned by `search_notes`.
-            anchor_text: Existing visible text to locate in the note.
-            plaintext_content: Plain text to insert. Do not send ENML or HTML.
-                Newlines are preserved and text is escaped before insertion.
-            position: Insert `before` or `after` the top-level ENML block
-                containing `anchor_text`.
-            occurrence: One-based match number when the anchor appears multiple
-                times.
-
-        Use first:
-            Call `get_note` first to inspect the current ENML content and choose
-            a stable `anchor_text`. Use a longer anchor when repeated sections
-            might otherwise match the wrong block.
-
-        Returns keys:
-            `guid`, `title`, `content`, `updated`, `notebookGuid`, `tagGuids`.
-            Evernote may include additional fields.
-
-        Fails when:
-            Raises `WriteAccessError` when the server is in read-only mode.
-            Raises `ValueError` if the anchor is missing or existing ENML cannot
-            be parsed.
-            Raises `EvernoteApiError` if the note changed before update or the
-            Evernote update request fails.
+        Use a distinctive anchor. Requires writes enabled.
         """
 
         _enforce_write_policy()
@@ -233,28 +137,7 @@ def register_write_note_tools(
         )
 
     def add_tags_by_name(note_guid: NoteGuid, tag_names: TagNames) -> dict[str, Any]:
-        """Attach tags to a note by name, creating missing tags automatically.
-
-        Args:
-            note_guid: Evernote note GUID returned by `search_notes`.
-            tag_names: Human-readable tag names. Blank strings are ignored and
-                duplicates are removed case-insensitively before the update.
-
-        Use first:
-            If `note_guid` is unknown, call `search_notes` first.
-            Call `get_note_metadata` first when you need existing `tagGuids`
-            without loading full ENML content, especially to avoid redundant
-            retagging.
-
-        Returns keys:
-            `guid`, `title`, `tagGuids`, `updated`, `notebookGuid`.
-            The response includes Evernote tag GUIDs, not original tag names.
-
-        Fails when:
-            Raises `WriteAccessError` when the server is in read-only mode.
-            Raises `EvernoteApiError` if the note update fails or Evernote
-            cannot list or create tags.
-        """
+        """Add tags to a note, creating missing tags. Requires writes enabled."""
 
         _enforce_write_policy()
         return evernote_gateway.add_tags_by_name(note_guid=note_guid, tag_names=tag_names)
@@ -263,30 +146,7 @@ def register_write_note_tools(
         note_guid: NoteGuid,
         destination_notebook_guid: NotebookGuid,
     ) -> dict[str, Any]:
-        """Move a note into another notebook.
-
-        Args:
-            note_guid: Evernote note GUID returned by `search_notes`.
-            destination_notebook_guid: Notebook GUID returned by
-                `list_notebooks`.
-
-        Use first:
-            If `note_guid` is unknown, call `search_notes` first.
-            Call `list_notebooks` first to resolve
-            `destination_notebook_guid`.
-            Call `get_note_metadata` when you need notebook/tag checks without
-            loading full ENML content, especially to avoid moving to the current
-            notebook by mistake.
-
-        Returns keys:
-            `guid`, `title`, `notebookGuid`, `updated`, `tagGuids`.
-            Evernote may include additional fields.
-
-        Fails when:
-            Raises `WriteAccessError` when the server is in read-only mode.
-            Raises `EvernoteApiError` if the note or destination notebook is not
-            accessible or the update request fails.
-        """
+        """Move a note to another notebook. Requires writes enabled."""
 
         _enforce_write_policy()
         return evernote_gateway.move_note(
@@ -300,33 +160,9 @@ def register_write_note_tools(
         notebook_guid: OptionalNotebookGuid = None,
         tag_names: OptionalTagNames = None,
     ) -> dict[str, Any]:
-        """Create a new note from plain text content.
+        """Create a plaintext note, optionally in a notebook with tags.
 
-        Args:
-            title: Human-readable note title.
-            plaintext_body: Plain text note body. Do not send ENML or HTML.
-                Newlines are preserved when the body is converted to ENML.
-            notebook_guid: Optional destination notebook GUID from
-                `list_notebooks`. Omit to use Evernote's default notebook.
-            tag_names: Optional human-readable tag names to attach. Missing tags
-                are created automatically. Blank names are ignored and
-                duplicates are removed case-insensitively.
-
-        Use first:
-            Call `list_notebooks` first when the note must go to a specific
-            notebook.
-            Call `search_notes` first when duplicate notes are possible and you
-            need to confirm a similar title does not already exist.
-
-        Returns keys:
-            `guid`, `title`, `content`, `created`, `updated`, `notebookGuid`,
-            `tagGuids`.
-            Use returned `guid` as `note_guid` in all note-specific tools.
-
-        Fails when:
-            Raises `WriteAccessError` when the server is in read-only mode.
-            Raises `EvernoteApiError` if Evernote rejects the note creation,
-            the notebook is invalid, or tag creation fails.
+        Requires writes enabled.
         """
 
         _enforce_write_policy()
@@ -338,25 +174,7 @@ def register_write_note_tools(
         )
 
     def delete_note(note_guid: NoteGuid) -> dict[str, Any]:
-        """Move an existing note to Evernote trash (soft delete).
-
-        Args:
-            note_guid: Evernote note GUID returned by `search_notes`.
-
-        Use first:
-            If `note_guid` is unknown, call `search_notes` first.
-            Call `get_note_metadata` first when you need to verify title,
-            notebook, or update timestamp before deleting.
-
-        Returns keys:
-            `guid`, `deleted`, `updateSequenceNum`.
-            `deleted` is `true` when Evernote accepts the request.
-
-        Fails when:
-            Raises `WriteAccessError` when the server is in read-only mode.
-            Raises `EvernoteApiError` if the note does not exist, is not
-            accessible, or the delete request fails.
-        """
+        """Move a note to Evernote trash. Requires writes enabled."""
 
         _enforce_write_policy()
         return evernote_gateway.delete_note(note_guid=note_guid)
